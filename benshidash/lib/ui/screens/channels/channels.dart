@@ -174,6 +174,7 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
     final theme = Theme.of(context);
     final bool isDark = Theme.of(context).brightness == Brightness.dark;
     const int crossAxisCount = 8;
+    const int rowCount = 4;
     const double gridSpacing = 8.0;
 
     return MainLayout(
@@ -183,8 +184,13 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
       child: LayoutBuilder(
         builder: (context, constraints) {
           final double gridWidth = constraints.maxWidth;
-          final double channelColumnWidth = (gridWidth - (gridSpacing * (crossAxisCount - 1))) / crossAxisCount;
-          final double maxButtonWidth = channelColumnWidth * 1.5;
+          final double gridHeight = constraints.maxHeight;
+          final double availableWidth = gridWidth - (gridSpacing * (crossAxisCount + 1));
+          final double availableHeight = gridHeight - (gridSpacing * (rowCount + 1));
+          final double buttonWidth = (availableWidth / crossAxisCount).clamp(36.0, 96.0);
+          final double buttonHeight = (availableHeight / rowCount).clamp(36.0, 96.0);
+          final double childAspectRatio = buttonWidth / buttonHeight;
+          final double maxButtonWidth = buttonWidth * 1.5;
 
           return Column(
             children: [
@@ -210,7 +216,7 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
                             shape: const StadiumBorder(),
                             textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 18),
                           ),
-                          label: const Text("Import from R...", overflow: TextOverflow.ellipsis),
+                          label: const Text("GPS Import", overflow: TextOverflow.ellipsis),
                         ),
                       ),
                     ),
@@ -283,19 +289,24 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
                   width: gridWidth,
                   child: GridView.builder(
                     physics: const NeverScrollableScrollPhysics(),
-                    padding: const EdgeInsets.symmetric(horizontal: 0),
+                    padding: EdgeInsets.symmetric(horizontal: gridSpacing),
                     gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                       crossAxisCount: crossAxisCount,
                       mainAxisSpacing: gridSpacing,
                       crossAxisSpacing: gridSpacing,
-                      childAspectRatio: 1,
+                      childAspectRatio: childAspectRatio,
                     ),
                     itemCount: 32,
                     itemBuilder: (context, index) {
                       final channel = _channels[index];
                       return GestureDetector(
                         onTap: () => _editChannel(index),
-                        child: _ChannelButton(channel: channel, isDark: isDark, theme: theme),
+                        child: _ChannelButton(
+                          channel: channel,
+                          isDark: isDark,
+                          theme: theme,
+                          buttonHeight: buttonHeight,
+                        ),
                       );
                     },
                   ),
@@ -313,15 +324,16 @@ class _ChannelButton extends StatelessWidget {
   final Channel channel;
   final bool isDark;
   final ThemeData theme;
+  final double buttonHeight;
   const _ChannelButton({
     required this.channel,
     required this.isDark,
     required this.theme,
+    required this.buttonHeight,
   });
 
   @override
   Widget build(BuildContext context) {
-    // Use theme color for border and text, not always green
     final borderColor = theme.dividerColor.withOpacity(isDark ? 0.7 : 0.6);
     final titleColor = theme.colorScheme.secondary;
     final textColor = theme.colorScheme.onSurface;
@@ -332,7 +344,7 @@ class _ChannelButton extends StatelessWidget {
       child: Container(
         decoration: BoxDecoration(
           color: theme.cardTheme.color ?? (isDark ? const Color(0xFF181C1F) : Colors.white),
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(buttonHeight * 0.18),
           border: Border.all(
             color: borderColor,
             width: 1.2,
@@ -346,7 +358,7 @@ class _ChannelButton extends StatelessWidget {
               Text(
                 'CH ${channel.channelId + 1}',
                 style: TextStyle(
-                  fontSize: 16,
+                  fontSize: buttonHeight * 0.18,
                   fontWeight: FontWeight.bold,
                   color: titleColor,
                 ),
@@ -355,7 +367,7 @@ class _ChannelButton extends StatelessWidget {
               Text(
                 channel.name.trim(),
                 style: TextStyle(
-                  fontSize: 15,
+                  fontSize: buttonHeight * 0.16,
                   fontWeight: FontWeight.w600,
                   color: textColor,
                   overflow: TextOverflow.ellipsis,
@@ -367,7 +379,7 @@ class _ChannelButton extends StatelessWidget {
               Text(
                 channel.rxFreq.toStringAsFixed(2),
                 style: TextStyle(
-                  fontSize: 14,
+                  fontSize: buttonHeight * 0.15,
                   fontWeight: FontWeight.w500,
                   color: subColor,
                 ),

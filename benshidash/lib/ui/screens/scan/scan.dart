@@ -64,6 +64,22 @@ class _ScanScreenState extends State<ScanScreen> {
     });
   }
 
+  void _selectAll() {
+    setState(() {
+      for (int i = 0; i < _channelActive.length; i++) {
+        _channelActive[i] = true;
+      }
+    });
+  }
+
+  void _deselectAll() {
+    setState(() {
+      for (int i = 0; i < _channelActive.length; i++) {
+        _channelActive[i] = false;
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     // 8 columns x 4 rows
@@ -84,11 +100,45 @@ class _ScanScreenState extends State<ScanScreen> {
       child: Column(
         children: [
           const SizedBox(height: 22),
-          Text(
-            'Scan Channels',
-            style: theme.textTheme.headlineMedium?.copyWith(
-              color: theme.colorScheme.onBackground,
-              fontWeight: FontWeight.w600,
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8.0),
+            child: Row(
+              children: [
+                // Left button
+                ElevatedButton(
+                  onPressed: _selectAll,
+                  style: ElevatedButton.styleFrom(
+                    shape: const StadiumBorder(),
+                    backgroundColor: theme.colorScheme.secondaryContainer,
+                    foregroundColor: theme.colorScheme.onSecondaryContainer,
+                    textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
+                  ),
+                  child: const Text("Select All"),
+                ),
+                // Expanded Scan Channels center title
+                Expanded(
+                  child: Center(
+                    child: Text(
+                      'Scan Channels',
+                      style: theme.textTheme.headlineMedium?.copyWith(
+                        color: theme.colorScheme.onBackground,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
+                // Right button
+                ElevatedButton(
+                  onPressed: _deselectAll,
+                  style: ElevatedButton.styleFrom(
+                    shape: const StadiumBorder(),
+                    backgroundColor: theme.colorScheme.secondaryContainer,
+                    foregroundColor: theme.colorScheme.onSecondaryContainer,
+                    textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
+                  ),
+                  child: const Text("Deselect All"),
+                ),
+              ],
             ),
           ),
           const SizedBox(height: 10),
@@ -97,7 +147,6 @@ class _ScanScreenState extends State<ScanScreen> {
               aspectRatio: crossAxisCount / 4,
               child: GridView.builder(
                 physics: const NeverScrollableScrollPhysics(),
-                // ERROR FIX: Removed 'const' because 'gridSpacing' is not a compile-time constant.
                 padding: EdgeInsets.symmetric(horizontal: gridSpacing),
                 gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                   crossAxisCount: crossAxisCount,
@@ -128,15 +177,16 @@ class _ScanScreenState extends State<ScanScreen> {
                                   blurRadius: 8,
                                 ),
                               ]
-                            : (theme.brightness == Brightness.light ? [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 2, offset: const Offset(0, 1))] : []),
+                            : (theme.brightness == Brightness.light
+                                ? [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 2, offset: const Offset(0, 1))]
+                                : []),
                         border: Border.all(
                           color: theme.dividerColor,
                           width: 1.2,
                         ),
                       ),
                       child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 2, vertical: 2),
+                        padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
@@ -155,8 +205,7 @@ class _ScanScreenState extends State<ScanScreen> {
                             ),
                             const SizedBox(height: 2),
                             Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 4, vertical: 2),
+                              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
                               decoration: BoxDecoration(
                                 color: isActive
                                     ? theme.colorScheme.onSecondary.withOpacity(0.2)
