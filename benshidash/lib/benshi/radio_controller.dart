@@ -1,3 +1,5 @@
+// benshi/radio_controller.dart
+
 import 'dart:async';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
@@ -22,13 +24,11 @@ class RadioController extends ChangeNotifier {
   Settings? settings;
   Position? gps;
   Channel? currentChannel;
-  // --- MODIFIED: VFO A and B are now nullable ---
   Channel? channelA;
   Channel? channelB;
   double? batteryVoltage;
   int? batteryLevelAsPercentage;
 
-  // --- MODIFIED: isReady now checks for VFO A and B ---
   bool get isReady => deviceInfo != null && status != null && settings != null && channelA != null && channelB != null;
   bool get isPowerOn => status?.isPowerOn ?? true;
   bool get isInTx => status?.isInTx ?? false;
@@ -97,35 +97,32 @@ class RadioController extends ChangeNotifier {
       case EventType.HT_STATUS_CHANGED:
         final statusReply = eventBody.event as GetHtStatusReplyBody;
         if (statusReply.status != null) {
-          final oldChannelId = status?.currentChannelId ?? -1;
           status = statusReply.status;
-          if (status!.currentChannelId != oldChannelId) {
-             getChannel(status!.currentChannelId);
-          }
           dataChanged = true;
         }
         break;
       case EventType.HT_SETTINGS_CHANGED:
         final settingsReply = eventBody.event as ReadSettingsReplyBody;
         if (settingsReply.settings != null) {
-           settings = settingsReply.settings;
-           // --- FIX: When settings change, re-fetch the VFO channels ---
-           await _updateVfoChannels();
-           dataChanged = true;
+          settings = settingsReply.settings;
+          await _updateVfoChannels();
+          dataChanged = true;
         }
         break;
       case EventType.HT_CH_CHANGED:
         final channelReply = eventBody.event as ReadRFChReplyBody;
         if (channelReply.rfCh != null) {
-           currentChannel = channelReply.rfCh;
-           // --- FIX: Check if this change affects VFO A or B and update them ---
-           if (channelReply.rfCh!.channelId == settings?.channelA) {
-              channelA = channelReply.rfCh;
-           }
-           if (channelReply.rfCh!.channelId == settings?.channelB) {
-              channelB = channelReply.rfCh;
-           }
-           dataChanged = true;
+            final updatedChannel = channelReply.rfCh!;
+            if (status?.currentChannelId == updatedChannel.channelId) {
+                currentChannel = updatedChannel;
+            }
+            if (updatedChannel.channelId == settings?.channelA) {
+              channelA = updatedChannel;
+            }
+            if (updatedChannel.channelId == settings?.channelB) {
+              channelB = updatedChannel;
+            }
+            dataChanged = true;
         }
         break;
       default:
@@ -136,7 +133,6 @@ class RadioController extends ChangeNotifier {
     }
   }
 
-  // --- MODIFIED: _initializeRadioState now calls _updateVfoChannels ---
   Future<void> _initializeRadioState() async {
     try {
       await _registerForEvents();
@@ -157,12 +153,10 @@ class RadioController extends ChangeNotifier {
       batteryVoltage = (results[4] as num?)?.toDouble();
       gps = results[5] as Position?;
 
-      // Load the currently active channel
       if (status != null) {
         currentChannel = await getChannel(status!.currentChannelId);
       }
 
-      // After getting settings, specifically load VFO A and B channels
       if (settings != null) {
         await _updateVfoChannels();
       }
@@ -174,12 +168,9 @@ class RadioController extends ChangeNotifier {
     }
   }
 
-  // --- NEW (was in old code, now restored): Fetches channel data for VFO A/B ---
-  /// Fetches the channel data for VFO A and B based on current settings.
   Future<void> _updateVfoChannels() async {
     if (settings == null) return;
     try {
-      // Use Future.wait to fetch both channels concurrently
       final results = await Future.wait([
         getChannel(settings!.channelA),
         getChannel(settings!.channelB),
@@ -188,7 +179,7 @@ class RadioController extends ChangeNotifier {
       channelB = results[1];
     } catch (e) {
       if (kDebugMode) print("Error updating VFO channels: $e");
-      channelA = null; // Clear on error
+      channelA = null;
       channelB = null;
     } finally {
       notifyListeners();
@@ -198,14 +189,14 @@ class RadioController extends ChangeNotifier {
   GaiaParseResult? _parseGaiaFrameFromBuffer() {
     int frameStart = _rxBuffer.indexOf(GaiaFrame.startByte);
     if (frameStart == -1) {
-       _rxBuffer = Uint8List(0);
-       return null;
+      _rxBuffer = Uint8List(0);
+      return null;
     }
     if (frameStart > 0) _rxBuffer = _rxBuffer.sublist(frameStart);
     if (_rxBuffer.length < 4) return null;
     if (_rxBuffer[1] != GaiaFrame.version) {
-       _rxBuffer = _rxBuffer.sublist(1);
-       return _parseGaiaFrameFromBuffer();
+      _rxBuffer = _rxBuffer.sublist(1);
+      return _parseGaiaFrameFromBuffer();
     }
     final messagePayloadLength = _rxBuffer[3];
     final fullMessageLength = messagePayloadLength + 4;
@@ -233,6 +224,7 @@ class RadioController extends ChangeNotifier {
   Future<T> _sendCommandExpectReply<T extends ReplyBody>({
     required Message command,
     required BasicCommand replyCommand,
+    bool Function(T body)? validator,
     Duration timeout = const Duration(seconds: 10),
   }) async {
     final completer = Completer<T>();
@@ -240,8 +232,13 @@ class RadioController extends ChangeNotifier {
 
     streamSub = _messageStreamController.stream.listen((message) {
       if (message.command == replyCommand && message.isReply) {
+        final body = message.body as T;
+
+        if (validator != null && !validator(body)) {
+          return;
+        }
+
         if (!completer.isCompleted) {
-          final body = message.body as T;
           if (body.replyStatus != ReplyStatus.SUCCESS) {
             completer.completeError(Exception("Command failed with status: ${body.replyStatus}"));
           } else {
@@ -268,14 +265,14 @@ class RadioController extends ChangeNotifier {
   Future<void> _registerForEvents() async {
     final eventsToRegister = [EventType.HT_STATUS_CHANGED, EventType.HT_SETTINGS_CHANGED, EventType.HT_CH_CHANGED];
     for (var eventType in eventsToRegister) {
-       final command = Message(
-         commandGroup: CommandGroup.BASIC,
-         command: BasicCommand.REGISTER_NOTIFICATION,
-         isReply: false,
-         body: RegisterNotificationBody(eventType: eventType)
-       );
-       await _sendCommand(command);
-       await Future.delayed(const Duration(milliseconds: 50));
+      final command = Message(
+        commandGroup: CommandGroup.BASIC,
+        command: BasicCommand.REGISTER_NOTIFICATION,
+        isReply: false,
+        body: RegisterNotificationBody(eventType: eventType)
+      );
+      await _sendCommand(command);
+      await Future.delayed(const Duration(milliseconds: 50));
     }
   }
 
@@ -454,11 +451,12 @@ class RadioController extends ChangeNotifier {
     final reply = await _sendCommandExpectReply<ReadRFChReplyBody>(
       command: Message(commandGroup: CommandGroup.BASIC, command: BasicCommand.READ_RF_CH, isReply: false, body: ReadRFChBody(channelId: channelId)),
       replyCommand: BasicCommand.READ_RF_CH,
+      validator: (body) => body.rfCh?.channelId == channelId,
     );
     if (reply.rfCh == null) throw Exception('Failed to get channel $channelId.');
     if (status?.currentChannelId == channelId) {
-       currentChannel = reply.rfCh;
-       notifyListeners();
+      currentChannel = reply.rfCh;
+      notifyListeners();
     }
     return reply.rfCh!;
   }
