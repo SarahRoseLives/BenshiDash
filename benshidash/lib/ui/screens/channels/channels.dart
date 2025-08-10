@@ -7,6 +7,7 @@ import '../../widgets/main_layout.dart';
 import '../../../benshi/radio_controller.dart';
 import '../../../main.dart'; // To get the global notifier
 
+// This is no longer needed for the screen's initial state but can be kept for predefined memories.
 List<Channel> generateMockChannels() {
   return List.generate(32, (index) {
     bool isAm = index < 4;
@@ -32,9 +33,9 @@ List<Channel> generateMockChannels() {
 }
 
 final List<Map<String, List<Channel>>> predefinedMemories = [
-  { "Family Trip": generateMockChannels() },
-  { "Bay Area Repeaters": generateMockChannels() },
-  { "Work Channels": generateMockChannels() },
+  {"Family Trip": generateMockChannels()},
+  {"Bay Area Repeaters": generateMockChannels()},
+  {"Work Channels": generateMockChannels()},
 ];
 
 class ChannelsScreen extends StatefulWidget {
@@ -45,31 +46,101 @@ class ChannelsScreen extends StatefulWidget {
 }
 
 class _ChannelsScreenState extends State<ChannelsScreen> {
-  late List<Channel> _channels;
+  // --- MODIFIED: State variables to handle loading and controller access ---
+  List<Channel>? _channels;
+  bool _isLoading = true;
+  String _statusMessage = 'Initializing...';
+  RadioController? _radioController;
   final List<Map<String, List<Channel>>> _savedMemories = [];
 
   @override
   void initState() {
     super.initState();
-    _channels = generateMockChannels();
+    // Get the controller instance from the global notifier
+    _radioController = radioControllerNotifier.value;
+    _loadAllChannels();
   }
 
+  // --- NEW: Method to load all channels from the radio ---
+  Future<void> _loadAllChannels() async {
+    if (!mounted || _radioController == null) {
+      setState(() {
+        _isLoading = false;
+        _statusMessage = 'Connect to a radio to program channels.';
+      });
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+      _statusMessage = 'Reading all channels from radio...';
+    });
+
+    try {
+      final channels = await _radioController!.getAllChannels();
+      if (mounted) {
+        setState(() {
+          _channels = channels;
+          _isLoading = false;
+          _statusMessage = '';
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _statusMessage = 'Error loading channels: $e';
+        });
+      }
+    }
+  }
+
+  // --- MODIFIED: Edit channel and write changes back to the radio ---
   void _editChannel(int index) async {
+    if (_channels == null || _radioController == null) return;
+
     final Channel? updatedChannel = await showModalBottomSheet<Channel>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (ctx) => _ChannelEditor(channel: _channels[index]),
+      builder: (ctx) => _ChannelEditor(channel: _channels![index]),
     );
 
     if (updatedChannel != null) {
       setState(() {
-        _channels[index] = updatedChannel;
+        _isLoading = true;
+        _statusMessage = 'Writing channel ${updatedChannel.channelId + 1} to radio...';
       });
+
+      try {
+        await _radioController!.writeChannel(updatedChannel);
+        setState(() {
+          _channels![index] = updatedChannel;
+          _statusMessage = 'Channel ${updatedChannel.channelId + 1} saved.';
+        });
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text("Failed to save channel: $e")),
+          );
+        }
+      } finally {
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+          });
+        }
+      }
     }
   }
 
   void _saveCurrentMemories() async {
+    if (_channels == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("No channels loaded to save.")),
+        );
+        return;
+    }
     final TextEditingController nameController = TextEditingController();
 
     final String? name = await showDialog<String>(
@@ -102,7 +173,7 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
 
     if (name != null && name.isNotEmpty) {
       setState(() {
-        _savedMemories.add({name: List<Channel>.from(_channels)});
+        _savedMemories.add({name: List<Channel>.from(_channels!)});
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text("Saved backup as '$name'")),
         );
@@ -110,7 +181,15 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
     }
   }
 
+  // --- MODIFIED: Load memories and write the entire list to the radio ---
   void _showLoadMemoriesDialog() async {
+    if (_radioController == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Connect to a radio first.")),
+      );
+      return;
+    }
+
     final List<Map<String, List<Channel>>> allMemories = [
       ...predefinedMemories,
       ..._savedMemories,
@@ -129,7 +208,7 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
             itemCount: memoryNames.length,
             itemBuilder: (context, idx) => ListTile(
               title: Text(memoryNames[idx]),
-              trailing: Icon(Icons.download),
+              trailing: const Icon(Icons.download),
               onTap: () => Navigator.of(ctx).pop(idx),
             ),
           ),
@@ -144,16 +223,43 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
     );
 
     if (selected != null && selected >= 0 && selected < allMemories.length) {
+      final channelsToLoad = allMemories[selected].values.first;
       setState(() {
-        _channels = List<Channel>.from(allMemories[selected].values.first);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Loaded memories: '${allMemories[selected].keys.first}'")),
-        );
+        _isLoading = true;
+        _statusMessage = 'Writing ${channelsToLoad.length} channels to radio...';
       });
+
+      try {
+        for (final channel in channelsToLoad) {
+          await _radioController!.writeChannel(channel);
+          await Future.delayed(const Duration(milliseconds: 60)); // Small delay between writes
+        }
+
+        if (mounted) {
+           ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text("Loaded and wrote memories: '${allMemories[selected].keys.first}'")),
+          );
+          // Refresh the state from the radio to be certain
+          await _loadAllChannels();
+        }
+
+      } catch (e) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text("Error writing memories: $e")),
+            );
+          }
+      } finally {
+        if(mounted) {
+          setState(() { _isLoading = false; });
+        }
+      }
     }
   }
 
   void _showImportRepeaterBook() async {
+    // This function remains mock for now as requested.
+    // When implemented, it should also write the new channels to the radio.
     final importedChannels = await showModalBottomSheet<List<Channel>>(
       context: context,
       isScrollControlled: true,
@@ -161,14 +267,10 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
       builder: (ctx) => const _RepeaterBookImportSheet(),
     );
     if (importedChannels != null && importedChannels.isNotEmpty) {
-      setState(() {
-        for (int i = 0; i < importedChannels.length && i < _channels.length; i++) {
-          _channels[i] = importedChannels[i];
-        }
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Imported channels from RepeaterBook (mock).")),
-        );
-      });
+      // In a real implementation, you would write these channels to the radio here.
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Mock import successful. In a real app, these would now be written to the radio.")),
+      );
     }
   }
 
@@ -180,14 +282,11 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
     const int rowCount = 4;
     const double gridSpacing = 8.0;
 
-    // Listen for connection status changes from the global notifier
     return ValueListenableBuilder<RadioController?>(
       valueListenable: radioControllerNotifier,
       builder: (context, radioController, _) {
         return MainLayout(
-          // --- THIS IS THE CHANGE ---
           radioController: radioController,
-          // --- END OF CHANGE ---
           radio: radio,
           battery: battery,
           gps: gps,
@@ -211,16 +310,14 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         ConstrainedBox(
-                          constraints: BoxConstraints(
-                            maxWidth: maxButtonWidth,
-                          ),
+                          constraints: BoxConstraints(maxWidth: maxButtonWidth),
                           child: SizedBox(
                             height: 44,
                             child: ElevatedButton.icon(
                               icon: const Icon(Icons.import_export),
                               onPressed: _showImportRepeaterBook,
                               style: ElevatedButton.styleFrom(
-                                minimumSize: Size(0, 44),
+                                minimumSize: const Size(0, 44),
                                 backgroundColor: theme.colorScheme.secondaryContainer,
                                 foregroundColor: theme.colorScheme.onSecondaryContainer,
                                 shape: const StadiumBorder(),
@@ -248,16 +345,14 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             ConstrainedBox(
-                              constraints: BoxConstraints(
-                                maxWidth: maxButtonWidth,
-                              ),
+                              constraints: BoxConstraints(maxWidth: maxButtonWidth),
                               child: SizedBox(
                                 height: 44,
                                 child: ElevatedButton.icon(
                                   icon: const Icon(Icons.save_alt),
-                                  onPressed: _saveCurrentMemories,
+                                  onPressed: _isLoading ? null : _saveCurrentMemories,
                                   style: ElevatedButton.styleFrom(
-                                    minimumSize: Size(0, 44),
+                                    minimumSize: const Size(0, 44),
                                     backgroundColor: theme.colorScheme.secondaryContainer,
                                     foregroundColor: theme.colorScheme.onSecondaryContainer,
                                     shape: const StadiumBorder(),
@@ -269,16 +364,14 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
                             ),
                             const SizedBox(width: 8),
                             ConstrainedBox(
-                              constraints: BoxConstraints(
-                                maxWidth: maxButtonWidth,
-                              ),
+                              constraints: BoxConstraints(maxWidth: maxButtonWidth),
                               child: SizedBox(
                                 height: 44,
                                 child: ElevatedButton.icon(
                                   icon: const Icon(Icons.folder_open),
-                                  onPressed: _showLoadMemoriesDialog,
+                                  onPressed: _isLoading ? null : _showLoadMemoriesDialog,
                                   style: ElevatedButton.styleFrom(
-                                    minimumSize: Size(0, 44),
+                                    minimumSize: const Size(0, 44),
                                     backgroundColor: theme.colorScheme.secondaryContainer,
                                     foregroundColor: theme.colorScheme.onSecondaryContainer,
                                     shape: const StadiumBorder(),
@@ -295,32 +388,47 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
                   ),
                   const SizedBox(height: 10),
                   Expanded(
-                    child: SizedBox(
-                      width: gridWidth,
-                      child: GridView.builder(
-                        physics: const NeverScrollableScrollPhysics(),
-                        padding: EdgeInsets.symmetric(horizontal: gridSpacing),
-                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: crossAxisCount,
-                          mainAxisSpacing: gridSpacing,
-                          crossAxisSpacing: gridSpacing,
-                          childAspectRatio: childAspectRatio,
-                        ),
-                        itemCount: 32,
-                        itemBuilder: (context, index) {
-                          final channel = _channels[index];
-                          return GestureDetector(
-                            onTap: () => _editChannel(index),
-                            child: _ChannelButton(
-                              channel: channel,
-                              isDark: isDark,
-                              theme: theme,
-                              buttonHeight: buttonHeight,
+                    child: _isLoading
+                        ? Center(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                const CircularProgressIndicator(),
+                                const SizedBox(height: 16),
+                                Text(_statusMessage, style: theme.textTheme.titleMedium),
+                              ],
                             ),
-                          );
-                        },
-                      ),
-                    ),
+                          )
+                        : (_channels == null
+                            ? Center(
+                                child: Text(_statusMessage, style: theme.textTheme.titleMedium),
+                              )
+                            : SizedBox(
+                                width: gridWidth,
+                                child: GridView.builder(
+                                  physics: const NeverScrollableScrollPhysics(),
+                                  padding: EdgeInsets.symmetric(horizontal: gridSpacing),
+                                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                                    crossAxisCount: crossAxisCount,
+                                    mainAxisSpacing: gridSpacing,
+                                    crossAxisSpacing: gridSpacing,
+                                    childAspectRatio: childAspectRatio,
+                                  ),
+                                  itemCount: _channels!.length,
+                                  itemBuilder: (context, index) {
+                                    final channel = _channels![index];
+                                    return GestureDetector(
+                                      onTap: () => _editChannel(index),
+                                      child: _ChannelButton(
+                                        channel: channel,
+                                        isDark: isDark,
+                                        theme: theme,
+                                        buttonHeight: buttonHeight,
+                                      ),
+                                    );
+                                  },
+                                ),
+                              )),
                   ),
                 ],
               );
