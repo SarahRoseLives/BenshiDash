@@ -1,8 +1,11 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
+import '../../../benshi/protocol/protocol.dart';
+import '../../../benshi/radio_controller.dart';
+import '../../../main.dart'; // To get the global notifier
 import '../../widgets/main_layout.dart';
 
-// Mock data for demonstration
+// Mock data for demonstration when not connected
 const vfoA = {
   "name": "Simplex",
   "channel": 12,
@@ -11,9 +14,6 @@ const vfoA = {
   "mod": "FM",
   "power": "High",
   "bandwidth": "Wide",
-  "sqOpen": true,
-  "ptt": false,
-  "rssi": 82,
 };
 const vfoB = {
   "name": "W6XYZ",
@@ -23,9 +23,6 @@ const vfoB = {
   "mod": "FM",
   "power": "Med",
   "bandwidth": "Narrow",
-  "sqOpen": false,
-  "ptt": true,
-  "rssi": 37,
 };
 const battery = {"voltage": 7.8, "percent": 85, "charging": false};
 const gps = {
@@ -56,29 +53,60 @@ class DashboardScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MainLayout(
-      radio: radio,
-      battery: battery,
-      gps: gps,
-      child: _DashboardContent(
-        vfoA: vfoA,
-        vfoB: vfoB,
-        radio: radio,
-        gps: gps,
+    // Listen for connection status changes from the global notifier
+    return ValueListenableBuilder<RadioController?>(
+      valueListenable: radioControllerNotifier,
+      builder: (context, radioController, _) {
+        return MainLayout(
+          radio: radio,
+          battery: battery,
+          gps: gps,
+          child: radioController == null || !radioController.isReady
+              ? const _NotConnectedView()
+              : AnimatedBuilder(
+                    animation: radioController,
+                    builder: (context, __) {
+                      return _DashboardContent(
+                        radioController: radioController,
+                      );
+                    },
+                  ),
+        );
+      },
+    );
+  }
+}
+
+class _NotConnectedView extends StatelessWidget {
+  const _NotConnectedView();
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.bluetooth_disabled, size: 64, color: theme.colorScheme.onSurface.withOpacity(0.5)),
+          const SizedBox(height: 16),
+          Text(
+            "Not Connected to Radio",
+            style: theme.textTheme.headlineSmall,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            "Go to Settings > Bluetooth to connect.",
+            style: theme.textTheme.bodyLarge?.copyWith(color: theme.colorScheme.onSurface.withOpacity(0.7)),
+          ),
+        ],
       ),
     );
   }
 }
 
 class _DashboardContent extends StatelessWidget {
-  final Map vfoA, vfoB, radio, gps;
+  final RadioController radioController;
 
-  const _DashboardContent({
-    required this.vfoA,
-    required this.vfoB,
-    required this.radio,
-    required this.gps,
-  });
+  const _DashboardContent({required this.radioController});
 
   @override
   Widget build(BuildContext context) {
@@ -87,12 +115,11 @@ class _DashboardContent extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         return _MainPanels(
+          radioController: radioController,
           fontScale: layout.scale,
           compact: layout.compact,
-          vfoA: vfoA,
-          vfoB: vfoB,
-          radio: radio,
           gps: gps,
+          radio: radio,
           maxHeight: constraints.maxHeight,
           maxWidth: constraints.maxWidth,
         );
@@ -102,16 +129,16 @@ class _DashboardContent extends StatelessWidget {
 }
 
 class _MainPanels extends StatelessWidget {
+  final RadioController radioController;
   final double fontScale;
   final bool compact;
-  final Map vfoA, vfoB, radio, gps;
+  final Map radio, gps;
   final double maxHeight;
   final double maxWidth;
   const _MainPanels({
+    required this.radioController,
     required this.fontScale,
     required this.compact,
-    required this.vfoA,
-    required this.vfoB,
     required this.radio,
     required this.gps,
     required this.maxHeight,
@@ -120,12 +147,6 @@ class _MainPanels extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Layout: 3 rows, with vertical spacing of 12 between rows and horizontal spacing of 10/12 between columns.
-    // Distribute available height proportionally.
-    // Top row: 2 VFOs (1 row)
-    // Middle row: GPS Follow + Nearby Repeaters (each 1/2)
-    // Bottom row: APRS, NOAA, Scan (3 columns)
-    // For a good look, proportions: top: 2.2, middle: 1.3, bottom: 1.2 (total: 4.7)
     const topFlex = 22.0;
     const middleFlex = 13.0;
     const bottomFlex = 12.0;
@@ -139,7 +160,6 @@ class _MainPanels extends StatelessWidget {
     final middleHeight = usableHeight * (middleFlex / totalFlex);
     final bottomHeight = usableHeight * (bottomFlex / totalFlex);
 
-    // Fixed width or expand up to maxWidth
     final contentWidth = maxWidth < 1100 ? maxWidth : 1100.0;
 
     return Center(
@@ -153,9 +173,9 @@ class _MainPanels extends StatelessWidget {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Expanded(child: _VfoPanel(vfo: vfoA, isA: true, fontScale: fontScale, compact: compact)),
+                  Expanded(child: _VfoPanel(radioController: radioController, isA: true, fontScale: fontScale, compact: compact)),
                   const SizedBox(width: 12),
-                  Expanded(child: _VfoPanel(vfo: vfoB, isA: false, fontScale: fontScale, compact: compact)),
+                  Expanded(child: _VfoPanel(radioController: radioController, isA: false, fontScale: fontScale, compact: compact)),
                 ],
               ),
             ),
@@ -192,9 +212,6 @@ class _MainPanels extends StatelessWidget {
   }
 }
 
-// ---- Helper Widgets ----
-
-/// A reusable Card widget that respects the global theme.
 class _StyledCard extends StatelessWidget {
   final Widget child;
   final double fontScale;
@@ -221,22 +238,39 @@ class _StyledCard extends StatelessWidget {
   }
 }
 
-
 class _VfoPanel extends StatelessWidget {
-  final Map vfo;
+  final RadioController radioController;
   final bool isA;
   final double fontScale;
   final bool compact;
+
   const _VfoPanel({
-    required this.vfo,
+    required this.radioController,
     required this.isA,
     required this.fontScale,
     required this.compact,
   });
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final onSurfaceColor = theme.colorScheme.onSurface;
+
+    final Channel? channel = isA ? radioController.channelA : radioController.channelB;
+    final StatusExt? status = radioController.status;
+
+    if (channel == null || status == null) {
+      return _StyledCard(
+        fontScale: fontScale,
+        padding: EdgeInsets.all(18.0 * fontScale),
+        child: const Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    final bool isActiveVfo = (isA && status.doubleChannel == ChannelType.A) || (!isA && status.doubleChannel == ChannelType.B);
+    final bool ptt = isActiveVfo && status.isInTx;
+    final bool sqOpen = isActiveVfo && (status.isInRx || status.isSq);
+    final double rssi = isActiveVfo ? status.rssi : 0.0;
 
     return _StyledCard(
       fontScale: fontScale,
@@ -250,14 +284,14 @@ class _VfoPanel extends StatelessWidget {
           SizedBox(height: 6 * fontScale),
           Row(
             children: [
-              Text("Ch ${vfo['channel']}: ${vfo['name']}",
+              Text("Ch ${channel.channelId}: ${channel.name}",
                   style: TextStyle(color: onSurfaceColor, fontSize: 17 * fontScale)),
               SizedBox(width: 10 * fontScale),
               Icon(
-                vfo['ptt'] ? Icons.record_voice_over : Icons.hearing,
-                color: vfo['ptt']
+                ptt ? Icons.record_voice_over : Icons.hearing,
+                color: ptt
                     ? theme.colorScheme.error
-                    : (vfo['sqOpen'] ? theme.colorScheme.primary : onSurfaceColor.withOpacity(0.3)),
+                    : (sqOpen ? theme.colorScheme.primary : onSurfaceColor.withOpacity(0.3)),
                 size: 24 * fontScale,
               ),
             ],
@@ -266,24 +300,24 @@ class _VfoPanel extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text("TX: ${vfo['tx']} MHz",
+              Text("TX: ${channel.txFreq.toStringAsFixed(4)} MHz",
                   style: TextStyle(color: onSurfaceColor.withOpacity(0.7), fontSize: 15 * fontScale)),
-              Text("RX: ${vfo['rx']} MHz",
+              Text("RX: ${channel.rxFreq.toStringAsFixed(4)} MHz",
                   style: TextStyle(color: onSurfaceColor.withOpacity(0.7), fontSize: 15 * fontScale)),
             ],
           ),
           SizedBox(height: 4 * fontScale),
           Row(
             children: [
-              _LabelChip("Mod: ${vfo['mod']}", fontScale: fontScale),
+              _LabelChip("Mod: ${channel.rxMod.name}", fontScale: fontScale),
               SizedBox(width: 8 * fontScale),
-              _LabelChip("Pwr: ${vfo['power']}", fontScale: fontScale),
+              _LabelChip("Pwr: ${channel.txPower}", fontScale: fontScale),
               SizedBox(width: 8 * fontScale),
-              _LabelChip(vfo['bandwidth'], fontScale: fontScale),
+              _LabelChip(channel.bandwidth.name, fontScale: fontScale),
             ],
           ),
           SizedBox(height: 8 * fontScale),
-          _RSSIMeter(rssi: vfo['rssi'], fontScale: fontScale),
+          _RSSIMeter(rssi: rssi.toInt(), fontScale: fontScale),
         ],
       ),
     );
@@ -672,8 +706,8 @@ class _APRSWidget extends StatelessWidget {
                   Text(
                     "APRS: ${gps['lat'].toStringAsFixed(4)}, ${gps['lon'].toStringAsFixed(4)}",
                     style: TextStyle(color: textColor, fontSize: 15 * fontScale),
-                    overflow: TextOverflow.ellipsis,
                     maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                   if (!compact)
                     Text("3 stations nearby", style: TextStyle(color: textColor.withOpacity(0.7), fontSize: 12 * fontScale)),

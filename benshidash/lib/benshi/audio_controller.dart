@@ -8,9 +8,9 @@ import 'package:flutter_bluetooth_serial/flutter_bluetooth_serial.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:path_provider/path_provider.dart';
 
-// --- CORRECTED IMPORTS ---
-import 'package:ffmpeg_kit_flutter_new/ffmpeg_kit.dart';
-import 'package:ffmpeg_kit_flutter_new/return_code.dart';
+// --- REMOVED FFmpeg IMPORTS ---
+// import 'package:ffmpeg_kit_flutter_new/ffmpeg_kit.dart';
+// import 'package:ffmpeg_kit_flutter_new/return_code.dart';
 
 import 'protocol/audio_protocol.dart';
 
@@ -71,16 +71,19 @@ class AudioController {
       }
       final message = result.message!;
       if (message is AudioData) {
-        // Use the corrected method here
-        _decodeAndPlayWithFiles(message.sbcData);
+        // --- MODIFIED: The call to the decoding method is now commented out ---
+        // _decodeAndPlayWithFiles(message.sbcData);
       }
       _audioBuffer = result.remainingBuffer;
     }
   }
 
-  // --- CORRECTED METHOD using temporary files ---
-  // This is simple and works, but has higher latency.
+  // --- MODIFIED: This method's body is commented out to remove the FFmpeg dependency ---
+  // It no longer decodes or plays audio.
   void _decodeAndPlayWithFiles(Uint8List sbcData) async {
+    // TODO: This functionality was removed because of the ffmpeg_kit_flutter_new dependency issue.
+    // To restore audio playback, a different method for decoding SBC to PCM is required.
+    /*
     if (sbcData.isEmpty) return;
 
     final tempDir = await getTemporaryDirectory();
@@ -119,6 +122,7 @@ class AudioController {
       if (await sbcFile.exists()) await sbcFile.delete();
       if (await pcmFile.exists()) await pcmFile.delete();
     }
+    */
   }
 
   void dispose() {

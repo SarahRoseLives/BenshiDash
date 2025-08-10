@@ -4,6 +4,9 @@ import '../../../benshi/protocol/protocol.dart';
 import '../home/dashboard.dart';
 import '../../widgets/main_layout.dart';
 
+import '../../../benshi/radio_controller.dart';
+import '../../../main.dart'; // To get the global notifier
+
 List<Channel> generateMockChannels() {
   return List.generate(32, (index) {
     bool isAm = index < 4;
@@ -177,65 +180,35 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
     const int rowCount = 4;
     const double gridSpacing = 8.0;
 
-    return MainLayout(
-      radio: radio,
-      battery: battery,
-      gps: gps,
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final double gridWidth = constraints.maxWidth;
-          final double gridHeight = constraints.maxHeight;
-          final double availableWidth = gridWidth - (gridSpacing * (crossAxisCount + 1));
-          final double availableHeight = gridHeight - (gridSpacing * (rowCount + 1));
-          final double buttonWidth = (availableWidth / crossAxisCount).clamp(36.0, 96.0);
-          final double buttonHeight = (availableHeight / rowCount).clamp(36.0, 96.0);
-          final double childAspectRatio = buttonWidth / buttonHeight;
-          final double maxButtonWidth = buttonWidth * 1.5;
+    // Listen for connection status changes from the global notifier
+    return ValueListenableBuilder<RadioController?>(
+      valueListenable: radioControllerNotifier,
+      builder: (context, radioController, _) {
+        return MainLayout(
+          // --- THIS IS THE CHANGE ---
+          radioController: radioController,
+          // --- END OF CHANGE ---
+          radio: radio,
+          battery: battery,
+          gps: gps,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final double gridWidth = constraints.maxWidth;
+              final double gridHeight = constraints.maxHeight;
+              final double availableWidth = gridWidth - (gridSpacing * (crossAxisCount + 1));
+              final double availableHeight = gridHeight - (gridSpacing * (rowCount + 1));
+              final double buttonWidth = (availableWidth / crossAxisCount).clamp(36.0, 96.0);
+              final double buttonHeight = (availableHeight / rowCount).clamp(36.0, 96.0);
+              final double childAspectRatio = buttonWidth / buttonHeight;
+              final double maxButtonWidth = buttonWidth * 1.5;
 
-          return Column(
-            children: [
-              const SizedBox(height: 22),
-              SizedBox(
-                width: gridWidth,
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    ConstrainedBox(
-                      constraints: BoxConstraints(
-                        maxWidth: maxButtonWidth,
-                      ),
-                      child: SizedBox(
-                        height: 44,
-                        child: ElevatedButton.icon(
-                          icon: const Icon(Icons.import_export),
-                          onPressed: _showImportRepeaterBook,
-                          style: ElevatedButton.styleFrom(
-                            minimumSize: Size(0, 44),
-                            backgroundColor: theme.colorScheme.secondaryContainer,
-                            foregroundColor: theme.colorScheme.onSecondaryContainer,
-                            shape: const StadiumBorder(),
-                            textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 18),
-                          ),
-                          label: const Text("GPS Import", overflow: TextOverflow.ellipsis),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Center(
-                        child: Text(
-                          'Channel Programming',
-                          style: theme.textTheme.headlineMedium?.copyWith(
-                            color: theme.colorScheme.onBackground,
-                            fontWeight: FontWeight.w700,
-                            fontSize: 32,
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
+              return Column(
+                children: [
+                  const SizedBox(height: 22),
+                  SizedBox(
+                    width: gridWidth,
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         ConstrainedBox(
                           constraints: BoxConstraints(
@@ -244,8 +217,8 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
                           child: SizedBox(
                             height: 44,
                             child: ElevatedButton.icon(
-                              icon: const Icon(Icons.save_alt),
-                              onPressed: _saveCurrentMemories,
+                              icon: const Icon(Icons.import_export),
+                              onPressed: _showImportRepeaterBook,
                               style: ElevatedButton.styleFrom(
                                 minimumSize: Size(0, 44),
                                 backgroundColor: theme.colorScheme.secondaryContainer,
@@ -253,69 +226,108 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
                                 shape: const StadiumBorder(),
                                 textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 18),
                               ),
-                              label: const Text("Save Backup", overflow: TextOverflow.ellipsis),
+                              label: const Text("GPS Import", overflow: TextOverflow.ellipsis),
                             ),
                           ),
                         ),
-                        const SizedBox(width: 8),
-                        ConstrainedBox(
-                          constraints: BoxConstraints(
-                            maxWidth: maxButtonWidth,
-                          ),
-                          child: SizedBox(
-                            height: 44,
-                            child: ElevatedButton.icon(
-                              icon: const Icon(Icons.folder_open),
-                              onPressed: _showLoadMemoriesDialog,
-                              style: ElevatedButton.styleFrom(
-                                minimumSize: Size(0, 44),
-                                backgroundColor: theme.colorScheme.secondaryContainer,
-                                foregroundColor: theme.colorScheme.onSecondaryContainer,
-                                shape: const StadiumBorder(),
-                                textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 18),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Center(
+                            child: Text(
+                              'Channel Programming',
+                              style: theme.textTheme.headlineMedium?.copyWith(
+                                color: theme.colorScheme.onBackground,
+                                fontWeight: FontWeight.w700,
+                                fontSize: 32,
                               ),
-                              label: const Text("Load Memories", overflow: TextOverflow.ellipsis),
                             ),
                           ),
+                        ),
+                        const SizedBox(width: 12),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            ConstrainedBox(
+                              constraints: BoxConstraints(
+                                maxWidth: maxButtonWidth,
+                              ),
+                              child: SizedBox(
+                                height: 44,
+                                child: ElevatedButton.icon(
+                                  icon: const Icon(Icons.save_alt),
+                                  onPressed: _saveCurrentMemories,
+                                  style: ElevatedButton.styleFrom(
+                                    minimumSize: Size(0, 44),
+                                    backgroundColor: theme.colorScheme.secondaryContainer,
+                                    foregroundColor: theme.colorScheme.onSecondaryContainer,
+                                    shape: const StadiumBorder(),
+                                    textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 18),
+                                  ),
+                                  label: const Text("Save Backup", overflow: TextOverflow.ellipsis),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            ConstrainedBox(
+                              constraints: BoxConstraints(
+                                maxWidth: maxButtonWidth,
+                              ),
+                              child: SizedBox(
+                                height: 44,
+                                child: ElevatedButton.icon(
+                                  icon: const Icon(Icons.folder_open),
+                                  onPressed: _showLoadMemoriesDialog,
+                                  style: ElevatedButton.styleFrom(
+                                    minimumSize: Size(0, 44),
+                                    backgroundColor: theme.colorScheme.secondaryContainer,
+                                    foregroundColor: theme.colorScheme.onSecondaryContainer,
+                                    shape: const StadiumBorder(),
+                                    textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 18),
+                                  ),
+                                  label: const Text("Load Memories", overflow: TextOverflow.ellipsis),
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                     ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 10),
-              Expanded(
-                child: SizedBox(
-                  width: gridWidth,
-                  child: GridView.builder(
-                    physics: const NeverScrollableScrollPhysics(),
-                    padding: EdgeInsets.symmetric(horizontal: gridSpacing),
-                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: crossAxisCount,
-                      mainAxisSpacing: gridSpacing,
-                      crossAxisSpacing: gridSpacing,
-                      childAspectRatio: childAspectRatio,
-                    ),
-                    itemCount: 32,
-                    itemBuilder: (context, index) {
-                      final channel = _channels[index];
-                      return GestureDetector(
-                        onTap: () => _editChannel(index),
-                        child: _ChannelButton(
-                          channel: channel,
-                          isDark: isDark,
-                          theme: theme,
-                          buttonHeight: buttonHeight,
-                        ),
-                      );
-                    },
                   ),
-                ),
-              ),
-            ],
-          );
-        },
-      ),
+                  const SizedBox(height: 10),
+                  Expanded(
+                    child: SizedBox(
+                      width: gridWidth,
+                      child: GridView.builder(
+                        physics: const NeverScrollableScrollPhysics(),
+                        padding: EdgeInsets.symmetric(horizontal: gridSpacing),
+                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: crossAxisCount,
+                          mainAxisSpacing: gridSpacing,
+                          crossAxisSpacing: gridSpacing,
+                          childAspectRatio: childAspectRatio,
+                        ),
+                        itemCount: 32,
+                        itemBuilder: (context, index) {
+                          final channel = _channels[index];
+                          return GestureDetector(
+                            onTap: () => _editChannel(index),
+                            child: _ChannelButton(
+                              channel: channel,
+                              isDark: isDark,
+                              theme: theme,
+                              buttonHeight: buttonHeight,
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+        );
+      },
     );
   }
 }

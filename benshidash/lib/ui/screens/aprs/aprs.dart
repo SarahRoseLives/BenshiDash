@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import '../../widgets/main_layout.dart';
 import '../home/dashboard.dart'; // For mock header/footer data
 
+import '../../../benshi/radio_controller.dart';
+import '../../../main.dart'; // To get the global notifier
+
 // A simple, custom class to hold coordinates. NO external package needed.
 class SimpleLatLng {
   final double latitude;
@@ -56,11 +59,20 @@ class AprsScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MainLayout(
-      radio: radio,
-      battery: battery,
-      gps: gps,
-      child: const _AprsContent(),
+    // Listen for connection status changes from the global notifier
+    return ValueListenableBuilder<RadioController?>(
+      valueListenable: radioControllerNotifier,
+      builder: (context, radioController, _) {
+        return MainLayout(
+          // --- THIS IS THE CHANGE ---
+          radioController: radioController,
+          // --- END OF CHANGE ---
+          radio: radio,
+          battery: battery,
+          gps: gps,
+          child: const _AprsContent(),
+        );
+      },
     );
   }
 }

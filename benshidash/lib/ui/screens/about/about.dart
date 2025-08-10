@@ -5,6 +5,9 @@ import '../../widgets/main_layout.dart';
 // If you want clickable URLs, also add:
 // import 'package:url_launcher/url_launcher.dart';
 
+import '../../../benshi/radio_controller.dart';
+import '../../../main.dart'; // To get the global notifier
+
 class AboutScreen extends StatelessWidget {
   const AboutScreen({super.key});
 
@@ -134,65 +137,74 @@ class AboutScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return MainLayout(
-      radio: radio,
-      battery: battery,
-      gps: gps,
-      child: Center(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 28.0, vertical: 32.0),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              GestureDetector(
-                onTap: () => _showPackagesDialog(context),
-                child: Icon(Icons.info_outline, size: 56, color: theme.colorScheme.primary),
+    // Listen for connection status changes from the global notifier
+    return ValueListenableBuilder<RadioController?>(
+      valueListenable: radioControllerNotifier,
+      builder: (context, radioController, _) {
+        return MainLayout(
+          // --- THIS IS THE CHANGE ---
+          radioController: radioController,
+          // --- END OF CHANGE ---
+          radio: radio,
+          battery: battery,
+          gps: gps,
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 28.0, vertical: 32.0),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  GestureDetector(
+                    onTap: () => _showPackagesDialog(context),
+                    child: Icon(Icons.info_outline, size: 56, color: theme.colorScheme.primary),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'About This App',
+                    style: theme.textTheme.headlineMedium?.copyWith(
+                      color: theme.colorScheme.onSurface,
+                      fontWeight: FontWeight.bold,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 24),
+                  Text(
+                    "This application was created after staring at a car's dashboard and thinking about what it might be like if ham radio operators had their own car dashboard just for their radio.\n\n"
+                    "Then it dawned on me that I had ported the benshi protocol from Benlink to Dart for Flutter apps like Benshi Commander.\n\n"
+                    "Thus I decided to base the head unit on these radios due to their Bluetooth functionality and the new ability to create Android apps thanks to my Flutter port of the protocol.\n\n"
+                    "Credits to Kyle Husmann for the original efforts to reverse engineer the benshi protocol and creating Benlink, which my Flutter port is based off of.",
+                    style: theme.textTheme.bodyLarge?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                      height: 1.35,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 32),
+                  Text(
+                    '— Created by SarahRose AD8NT/K8SDR',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.primary,
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
+                  const SizedBox(height: 22),
+                  OutlinedButton.icon(
+                    icon: const Icon(Icons.info_outline_rounded),
+                    label: const Text("Show Packages & Credits"),
+                    onPressed: () => _showPackagesDialog(context),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: theme.colorScheme.primary,
+                      side: BorderSide(color: theme.colorScheme.primary),
+                      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                      textStyle: theme.textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 16),
-              Text(
-                'About This App',
-                style: theme.textTheme.headlineMedium?.copyWith(
-                  color: theme.colorScheme.onSurface,
-                  fontWeight: FontWeight.bold,
-                ),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 24),
-              Text(
-                "This application was created after staring at a car's dashboard and thinking about what it might be like if ham radio operators had their own car dashboard just for their radio.\n\n"
-                "Then it dawned on me that I had ported the benshi protocol from Benlink to Dart for Flutter apps like Benshi Commander.\n\n"
-                "Thus I decided to base the head unit on these radios due to their Bluetooth functionality and the new ability to create Android apps thanks to my Flutter port of the protocol.\n\n"
-                "Credits to Kyle Husmann for the original efforts to reverse engineer the benshi protocol and creating Benlink, which my Flutter port is based off of.",
-                style: theme.textTheme.bodyLarge?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                  height: 1.35,
-                ),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 32),
-              Text(
-                '— Created by SarahRose AD8NT/K8SDR',
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: theme.colorScheme.primary,
-                  fontStyle: FontStyle.italic,
-                ),
-              ),
-              const SizedBox(height: 22),
-              OutlinedButton.icon(
-                icon: const Icon(Icons.info_outline_rounded),
-                label: const Text("Show Packages & Credits"),
-                onPressed: () => _showPackagesDialog(context),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: theme.colorScheme.primary,
-                  side: BorderSide(color: theme.colorScheme.primary),
-                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-                  textStyle: theme.textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.bold),
-                ),
-              ),
-            ],
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }

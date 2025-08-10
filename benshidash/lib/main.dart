@@ -1,10 +1,55 @@
 import 'package:flutter/material.dart';
-import 'ui/screens/settings/settings.dart'; // Import to access the global notifier
+import 'benshi/radio_controller.dart';
+import 'ui/screens/settings/settings.dart';
 import 'ui/screens/splash.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_bluetooth_serial/flutter_bluetooth_serial.dart';
 
-void main() {
+
+/// A global notifier to hold the app's single RadioController instance.
+/// Widgets can listen to this to react to connection/disconnection events.
+final ValueNotifier<RadioController?> radioControllerNotifier = ValueNotifier(null);
+
+// The key we'll use to store the device address
+const String PREF_LAST_DEVICE_ADDRESS = 'last_connected_device_address';
+
+Future<void> main() async {
+  // Ensure Flutter is initialized before we run async code
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // Attempt to auto-connect to the last device
+  await _tryAutoConnect();
+
   runApp(const CarHeadUnitApp());
 }
+
+/// Checks for a saved device address and attempts to connect to it.
+Future<void> _tryAutoConnect() async {
+  final prefs = await SharedPreferences.getInstance();
+  final String? deviceAddress = prefs.getString(PREF_LAST_DEVICE_ADDRESS);
+
+  if (deviceAddress != null) {
+    print("Found saved device: $deviceAddress. Attempting to auto-connect...");
+    try {
+      // Create a device object from the saved address
+      BluetoothDevice device = BluetoothDevice(address: deviceAddress);
+
+      // Create and connect the controller
+      final controller = RadioController(device: device);
+      await controller.connect();
+
+      // Update the global notifier so the app knows we're connected
+      radioControllerNotifier.value = controller;
+      print("Auto-connect successful.");
+
+    } catch (e) {
+      print("Auto-connect failed: $e. Clearing saved device.");
+      // If connection fails, clear the saved address to prevent future errors
+      await prefs.remove(PREF_LAST_DEVICE_ADDRESS);
+    }
+  }
+}
+
 
 /// Defines the color schemes and styles for the app's light and dark themes.
 class AppThemes {
@@ -24,7 +69,7 @@ class AppThemes {
       error: Colors.redAccent,
       onError: Colors.black,
     ),
-    cardTheme: CardThemeData( // <-- FIX: Was CardTheme
+    cardTheme: CardThemeData(
       color: Colors.white.withOpacity(0.07),
       elevation: 0,
     ),
@@ -48,7 +93,7 @@ class AppThemes {
       error: Colors.red.shade700,
       onError: Colors.white,
     ),
-    cardTheme: CardThemeData( // <-- FIX: Was CardTheme
+    cardTheme: CardThemeData(
       color: const Color(0xFFF5F5F5), // Grey 100
       elevation: 1,
       shadowColor: Colors.black26,
@@ -63,8 +108,6 @@ class CarHeadUnitApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // AnimatedBuilder rebuilds the MaterialApp whenever the themeNotifier changes.
-    // This makes the entire app's theme reactive.
     return AnimatedBuilder(
       animation: themeNotifier,
       builder: (context, child) {

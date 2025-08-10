@@ -1,6 +1,8 @@
 // ui/widgets/main_layout.dart
 
 import 'dart:math';
+import 'package:benshidash/benshi/radio_controller.dart';
+import 'package:benshidash/main.dart';
 import 'package:flutter/material.dart';
 
 // Import all the destination screens
@@ -8,7 +10,7 @@ import '../screens/about/about.dart';
 import '../screens/aprs/aprs.dart';
 import '../screens/channels/channels.dart';
 import '../screens/home/dashboard.dart';
-import '../screens/radio_settings/radio_settings.dart'; // <-- ADDED IMPORT
+import '../screens/radio_settings/radio_settings.dart';
 import '../screens/scan/scan.dart';
 import '../screens/settings/settings.dart';
 
@@ -44,6 +46,7 @@ class MainLayout extends StatelessWidget {
   final Map radio;
   final Map battery;
   final Map gps;
+  final RadioController? radioController;
 
   const MainLayout({
     super.key,
@@ -51,84 +54,79 @@ class MainLayout extends StatelessWidget {
     required this.radio,
     required this.battery,
     required this.gps,
+    this.radioController,
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        // --- Layout Calculation ---
-        final refWidth = 1200.0;
-        final refHeight = 600.0;
-        final scaleW = constraints.maxWidth / refWidth;
-        final scaleH = constraints.maxHeight / refHeight;
-        final scale = max(0.2, min(scaleW, scaleH));
-        final compact = scale < 0.62;
-        final isPortrait =
-            constraints.maxWidth < 900 || constraints.maxWidth < constraints.maxHeight;
+    // This Scaffold is the key to fixing the context errors.
+    return Scaffold(
+      backgroundColor: theme.scaffoldBackgroundColor,
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final refWidth = 1200.0;
+          final refHeight = 600.0;
+          final scaleW = constraints.maxWidth / refWidth;
+          final scaleH = constraints.maxHeight / refHeight;
+          final scale = max(0.2, min(scaleW, scaleH));
+          final compact = scale < 0.62;
+          final isPortrait =
+              constraints.maxWidth < 900 || constraints.maxWidth < constraints.maxHeight;
 
-        // --- Provide layout data to children via InheritedWidget ---
-        return LayoutData(
-          scale: scale,
-          compact: compact,
-          isPortrait: isPortrait,
-          child: Builder(
-              // Use a Builder to get a context that can see LayoutData
-              builder: (context) {
-            return Container(
-              color: theme.scaffoldBackgroundColor,
-              width: constraints.maxWidth,
-              height: constraints.maxHeight,
-              child: Padding(
-                padding: EdgeInsets.all(12.0 * scale),
-                child: Column(
-                  children: [
-                    // Top status row
-                    SizedBox(
-                      height: 60 * scale,
-                      child: _TopStatusRow(
-                        fontScale: scale,
-                        radio: radio,
-                        battery: battery,
-                        gps: gps,
+          return LayoutData(
+            scale: scale,
+            compact: compact,
+            isPortrait: isPortrait,
+            child: Builder(
+                builder: (context) {
+              return Container(
+                width: constraints.maxWidth,
+                height: constraints.maxHeight,
+                child: Padding(
+                  padding: EdgeInsets.all(12.0 * scale),
+                  child: Column(
+                    children: [
+                      SizedBox(
+                        height: 60 * scale,
+                        child: _TopStatusRow(
+                          fontScale: scale,
+                          radio: radio,
+                          battery: battery,
+                          gps: gps,
+                        ),
                       ),
-                    ),
-                    SizedBox(height: 10 * scale),
-                    // Main content area
-                    Expanded(
-                      child: isPortrait
-                          ? _MobileLayout(child: child)
-                          : _DesktopLayout(child: child),
-                    ),
-                    SizedBox(height: 10 * scale),
-                    // Bottom status bar
-                    SizedBox(
-                      height: 36 * scale,
-                      child: _BottomStatusBar(
-                        fontScale: scale,
-                        compact: compact,
-                        gps: gps,
-                        radio: radio,
-                        battery: battery,
+                      SizedBox(height: 10 * scale),
+                      Expanded(
+                        child: isPortrait
+                            ? _MobileLayout(child: child, radioController: radioController)
+                            : _DesktopLayout(child: child, radioController: radioController),
                       ),
-                    ),
-                  ],
+                      SizedBox(height: 10 * scale),
+                      SizedBox(
+                        height: 36 * scale,
+                        child: _BottomStatusBar(
+                          fontScale: scale,
+                          compact: compact,
+                          gps: gps,
+                          radio: radio,
+                          battery: battery,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-            );
-          }),
-        );
-      },
+              );
+            }),
+          );
+        },
+      ),
     );
   }
 }
 
-// ---- Navigation Helper ----
 void _navigateTo(BuildContext context, Widget screen) {
-  // Use pushReplacement to avoid building layouts on top of each other.
-  // This replaces the current screen instead of pushing it onto the stack.
   Navigator.of(context).pushReplacement(
     PageRouteBuilder(
       pageBuilder: (context, animation1, animation2) => screen,
@@ -138,10 +136,10 @@ void _navigateTo(BuildContext context, Widget screen) {
   );
 }
 
-// ---- Responsive Content Containers ----
 class _DesktopLayout extends StatelessWidget {
   final Widget child;
-  const _DesktopLayout({required this.child});
+  final RadioController? radioController;
+  const _DesktopLayout({required this.child, this.radioController});
 
   @override
   Widget build(BuildContext context) {
@@ -150,16 +148,24 @@ class _DesktopLayout extends StatelessWidget {
       children: [
         _Sidebar(
           items: [
-            // --- MODIFIED SIDEBAR ITEM ---
             _SidebarItem(
               icon: Icons.tune,
               label: "Radio Setup",
               onTap: () => _navigateTo(context, const RadioSettingsScreen()),
             ),
+            // --- FIX #1: Removed the incorrect Builder widget ---
             _SidebarItem(
               icon: Icons.settings_input_antenna,
               label: "Scan",
-              onTap: () => _navigateTo(context, const ScanScreen()),
+              onTap: () {
+                if (radioController != null) {
+                  _navigateTo(context, const ScanScreen());
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Please connect to a radio first.')),
+                  );
+                }
+              },
             ),
             _SidebarItem(
               icon: Icons.settings,
@@ -171,7 +177,7 @@ class _DesktopLayout extends StatelessWidget {
         SizedBox(width: 10 * layout.scale),
         Expanded(
           flex: 4,
-          child: child, // The main screen content is injected here
+          child: child,
         ),
         SizedBox(width: 10 * layout.scale),
         _Sidebar(
@@ -201,7 +207,8 @@ class _DesktopLayout extends StatelessWidget {
 
 class _MobileLayout extends StatelessWidget {
   final Widget child;
-  const _MobileLayout({required this.child});
+  final RadioController? radioController;
+  const _MobileLayout({required this.child, this.radioController});
 
   @override
   Widget build(BuildContext context) {
@@ -209,16 +216,24 @@ class _MobileLayout extends StatelessWidget {
       children: [
         _Sidebar(
           items: [
-            // --- MODIFIED SIDEBAR ITEM ---
             _SidebarItem(
               icon: Icons.tune,
               label: "",
               onTap: () => _navigateTo(context, const RadioSettingsScreen()),
             ),
+            // --- FIX #2: Removed the incorrect Builder widget ---
             _SidebarItem(
               icon: Icons.settings_input_antenna,
               label: "",
-              onTap: () => _navigateTo(context, const ScanScreen()),
+              onTap: () {
+                if (radioController != null) {
+                  _navigateTo(context, const ScanScreen());
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Please connect to a radio first.')),
+                  );
+                }
+              },
             ),
             _SidebarItem(
               icon: Icons.settings,
@@ -232,7 +247,7 @@ class _MobileLayout extends StatelessWidget {
           flex: 4,
           child: SingleChildScrollView(
             scrollDirection: Axis.vertical,
-            child: child, // The main screen content is injected here
+            child: child,
           ),
         ),
         SizedBox(width: 8 * LayoutData.of(context)!.scale),
@@ -260,8 +275,6 @@ class _MobileLayout extends StatelessWidget {
     );
   }
 }
-
-// ---- Shell Components ----
 
 class _SidebarItem {
   final IconData icon;

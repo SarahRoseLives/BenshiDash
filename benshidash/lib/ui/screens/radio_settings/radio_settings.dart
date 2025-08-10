@@ -1,9 +1,10 @@
-// ui/screens/radio_settings/radio_settings.dart
-
 import 'package:flutter/material.dart';
 import '../../../benshi/protocol/protocol.dart';
 import '../home/dashboard.dart';
 import '../../widgets/main_layout.dart';
+
+import '../../../benshi/radio_controller.dart';
+import '../../../main.dart'; // To get the global notifier
 
 class RadioSettingsScreen extends StatefulWidget {
   const RadioSettingsScreen({super.key});
@@ -43,137 +44,146 @@ class _RadioSettingsScreenState extends State<RadioSettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return MainLayout(
-      radio: radio,
-      battery: battery,
-      gps: gps,
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        appBar: AppBar(
-          title: const Text('Radio Settings'),
-          backgroundColor: theme.colorScheme.surface,
-          actions: [
-            TextButton.icon(
-              icon: const Icon(Icons.restart_alt),
-              label: const Text('Reset'),
-              onPressed: () {
-                setState(() {
-                  _currentSettings = _initialSettings;
-                });
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Settings reset to default.')),
-                );
-              },
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8.0),
-              child: ElevatedButton.icon(
-                icon: const Icon(Icons.save),
-                label: const Text('Save'),
-                onPressed: () {
-                  // In a real app, this would send the settings to the radio.
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Settings saved! (Mock)')),
-                  );
-                },
-              ),
-            ),
-          ],
-        ),
-        body: ListView(
-          padding: const EdgeInsets.all(16.0),
-          children: [
-            _buildSectionTitle('General', theme),
-            Card(
-              child: Column(
-                children: [
-                  _buildSliderSetting(
-                    title: 'Squelch Level',
-                    subtitle: 'Current: ${_currentSettings.squelchLevel}',
-                    value: _currentSettings.squelchLevel.toDouble(),
-                    min: 0,
-                    max: 9,
-                    divisions: 9,
-                    onChanged: (val) => setState(() => _currentSettings =
-                        _currentSettings.copyWith(squelchLevel: val.round())),
-                  ),
-                  _buildSliderSetting(
-                    title: 'Microphone Gain',
-                    subtitle: 'Current: ${_currentSettings.micGain}',
-                    value: _currentSettings.micGain.toDouble(),
-                    min: 0,
-                    max: 7,
-                    divisions: 7,
-                    onChanged: (val) => setState(() => _currentSettings =
-                        _currentSettings.copyWith(micGain: val.round())),
-                  ),
-                  _buildDropdownSetting<int>(
-                    title: 'VFO Mode',
-                    value: _currentSettings.vfoX,
-                    items: const {0: 'Memory', 1: 'VFO A', 2: 'VFO B'},
-                    onChanged: (val) => setState(
-                        () => _currentSettings = _currentSettings.copyWith(vfoX: val)),
-                  ),
-                ],
-              ),
-            ),
-            _buildSectionTitle('Power & Timers', theme),
-            Card(
-              child: Column(
-                children: [
-                  _buildSwitchSetting(
-                    title: 'Auto Power On',
-                    subtitle: 'Turn radio on with vehicle power',
-                    value: _currentSettings.autoPowerOn,
-                    onChanged: (val) => setState(() =>
-                        _currentSettings = _currentSettings.copyWith(autoPowerOn: val)),
-                  ),
-                  _buildSwitchSetting(
-                    title: 'Power Saving Mode',
-                    subtitle: 'Reduces battery consumption',
-                    value: _currentSettings.powerSavingMode,
-                    onChanged: (val) => setState(() => _currentSettings =
-                        _currentSettings.copyWith(powerSavingMode: val)),
-                  ),
-                  _buildDropdownSetting<int>(
-                    title: 'Transmit Time-Out',
-                    value: _currentSettings.txTimeLimit,
-                    items: const {
-                      0: 'Off', 1: '15s', 12: '60s', 24: '120s', 31: '180s'
+    // Listen for connection status changes from the global notifier
+    return ValueListenableBuilder<RadioController?>(
+      valueListenable: radioControllerNotifier,
+      builder: (context, radioController, _) {
+        return MainLayout(
+          // --- THIS IS THE CHANGE ---
+          radioController: radioController,
+          // --- END OF CHANGE ---
+          radio: radio,
+          battery: battery,
+          gps: gps,
+          child: Scaffold(
+            backgroundColor: Colors.transparent,
+            appBar: AppBar(
+              title: const Text('Radio Settings'),
+              backgroundColor: theme.colorScheme.surface,
+              actions: [
+                TextButton.icon(
+                  icon: const Icon(Icons.restart_alt),
+                  label: const Text('Reset'),
+                  onPressed: () {
+                    setState(() {
+                      _currentSettings = _initialSettings;
+                    });
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Settings reset to default.')),
+                    );
+                  },
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                  child: ElevatedButton.icon(
+                    icon: const Icon(Icons.save),
+                    label: const Text('Save'),
+                    onPressed: () {
+                      // In a real app, this would send the settings to the radio.
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Settings saved! (Mock)')),
+                      );
                     },
-                    onChanged: (val) => setState(() => _currentSettings =
-                        _currentSettings.copyWith(txTimeLimit: val)),
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
-            _buildSectionTitle('Audio & Bluetooth', theme),
-            Card(
-              child: Column(
-                children: [
-                  _buildSwitchSetting(
-                    title: 'Squelch Tail Elimination',
-                    subtitle: 'Reduces noise at the end of transmissions',
-                    value: _currentSettings.tailElim,
-                    onChanged: (val) => setState(() =>
-                        _currentSettings = _currentSettings.copyWith(tailElim: val)),
+            body: ListView(
+              padding: const EdgeInsets.all(16.0),
+              children: [
+                _buildSectionTitle('General', theme),
+                Card(
+                  child: Column(
+                    children: [
+                      _buildSliderSetting(
+                        title: 'Squelch Level',
+                        subtitle: 'Current: ${_currentSettings.squelchLevel}',
+                        value: _currentSettings.squelchLevel.toDouble(),
+                        min: 0,
+                        max: 9,
+                        divisions: 9,
+                        onChanged: (val) => setState(() => _currentSettings =
+                            _currentSettings.copyWith(squelchLevel: val.round())),
+                      ),
+                      _buildSliderSetting(
+                        title: 'Microphone Gain',
+                        subtitle: 'Current: ${_currentSettings.micGain}',
+                        value: _currentSettings.micGain.toDouble(),
+                        min: 0,
+                        max: 7,
+                        divisions: 7,
+                        onChanged: (val) => setState(() => _currentSettings =
+                            _currentSettings.copyWith(micGain: val.round())),
+                      ),
+                      _buildDropdownSetting<int>(
+                        title: 'VFO Mode',
+                        value: _currentSettings.vfoX,
+                        items: const {0: 'Memory', 1: 'VFO A', 2: 'VFO B'},
+                        onChanged: (val) => setState(
+                            () => _currentSettings = _currentSettings.copyWith(vfoX: val)),
+                      ),
+                    ],
                   ),
-                  _buildSliderSetting(
-                    title: 'Bluetooth Mic Gain',
-                    subtitle: 'Current: ${_currentSettings.btMicGain}',
-                    value: _currentSettings.btMicGain.toDouble(),
-                    min: 0,
-                    max: 7,
-                    divisions: 7,
-                    onChanged: (val) => setState(() => _currentSettings =
-                        _currentSettings.copyWith(btMicGain: val.round())),
+                ),
+                _buildSectionTitle('Power & Timers', theme),
+                Card(
+                  child: Column(
+                    children: [
+                      _buildSwitchSetting(
+                        title: 'Auto Power On',
+                        subtitle: 'Turn radio on with vehicle power',
+                        value: _currentSettings.autoPowerOn,
+                        onChanged: (val) => setState(() =>
+                            _currentSettings = _currentSettings.copyWith(autoPowerOn: val)),
+                      ),
+                      _buildSwitchSetting(
+                        title: 'Power Saving Mode',
+                        subtitle: 'Reduces battery consumption',
+                        value: _currentSettings.powerSavingMode,
+                        onChanged: (val) => setState(() => _currentSettings =
+                            _currentSettings.copyWith(powerSavingMode: val)),
+                      ),
+                      _buildDropdownSetting<int>(
+                        title: 'Transmit Time-Out',
+                        value: _currentSettings.txTimeLimit,
+                        items: const {
+                          0: 'Off', 1: '15s', 12: '60s', 24: '120s', 31: '180s'
+                        },
+                        onChanged: (val) => setState(() => _currentSettings =
+                            _currentSettings.copyWith(txTimeLimit: val)),
+                      ),
+                    ],
                   ),
-                ],
-              ),
+                ),
+                _buildSectionTitle('Audio & Bluetooth', theme),
+                Card(
+                  child: Column(
+                    children: [
+                      _buildSwitchSetting(
+                        title: 'Squelch Tail Elimination',
+                        subtitle: 'Reduces noise at the end of transmissions',
+                        value: _currentSettings.tailElim,
+                        onChanged: (val) => setState(() =>
+                            _currentSettings = _currentSettings.copyWith(tailElim: val)),
+                      ),
+                      _buildSliderSetting(
+                        title: 'Bluetooth Mic Gain',
+                        subtitle: 'Current: ${_currentSettings.btMicGain}',
+                        value: _currentSettings.btMicGain.toDouble(),
+                        min: 0,
+                        max: 7,
+                        divisions: 7,
+                        onChanged: (val) => setState(() => _currentSettings =
+                            _currentSettings.copyWith(btMicGain: val.round())),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 
