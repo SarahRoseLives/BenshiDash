@@ -823,3 +823,48 @@ factory Settings.fromBytes(Uint8List bytes) {
     );
   }
 }
+
+// -----------------------------------------------------------------------------
+// TncDataFragment DATA MODEL FOR APRS/BSS PACKETS (added as instructed)
+// -----------------------------------------------------------------------------
+
+class TncDataFragment {
+  final bool isFinalFragment;
+  final bool withChannelId;
+  final int fragmentId;
+  final Uint8List data;
+  final int? channelId;
+
+  TncDataFragment({
+    required this.isFinalFragment,
+    required this.withChannelId,
+    required this.fragmentId,
+    required this.data,
+    this.channelId,
+  });
+
+  factory TncDataFragment.fromBytes(Uint8List bytes) {
+    final r = ByteReader(bytes);
+
+    final isFinalFragment = r.readBool(); // 1 bit
+    final withChannelId = r.readBool();   // 1 bit
+    final fragmentId = r.readInt(6);      // 6 bits
+
+    // The data payload is the rest of the buffer, minus one byte for the channel ID if it's present.
+    int dataLength = r.remainingBits ~/ 8;
+    if (withChannelId && dataLength > 0) {
+      dataLength--;
+    }
+
+    final data = r.readBytes(dataLength);
+    final channelId = withChannelId ? r.readInt(8) : null;
+
+    return TncDataFragment(
+      isFinalFragment: isFinalFragment,
+      withChannelId: withChannelId,
+      fragmentId: fragmentId,
+      data: data,
+      channelId: channelId,
+    );
+  }
+}

@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_bluetooth_serial/flutter_bluetooth_serial.dart';
 import 'protocol/protocol.dart';
+import 'dart:convert';
 
 import 'audio_controller.dart';
 
@@ -28,6 +29,10 @@ class RadioController extends ChangeNotifier {
   Channel? channelB;
   double? batteryVoltage;
   int? batteryLevelAsPercentage;
+
+  // --- ADD THIS ---
+  List<TncDataFragment> aprsPackets = [];
+  // ----------------
 
   bool get isReady => deviceInfo != null && status != null && settings != null && channelA != null && channelB != null;
   bool get isPowerOn => status?.isPowerOn ?? true;
@@ -125,6 +130,30 @@ class RadioController extends ChangeNotifier {
             dataChanged = true;
         }
         break;
+      // --- ADD THIS CASE ---
+      case EventType.DATA_RXD:
+        final aprsBody = eventBody.event as DataRxdEventBody;
+        final packet = aprsBody.tncDataFragment;
+
+        // Add the new packet to the list
+        aprsPackets.add(packet);
+
+        // Optional: To prevent the list from growing forever, keep only the last 50 packets.
+        if (aprsPackets.length > 50) {
+          aprsPackets.removeAt(0);
+        }
+
+        if (kDebugMode) {
+          // You can use utf8.decode for APRS text, but be careful as some data is binary.
+          try {
+             print("APRS/BSS Data Received: ${utf8.decode(packet.data)}");
+          } catch (_) {
+             print("APRS/BSS Binary Data Received: ${packet.data}");
+          }
+        }
+        dataChanged = true;
+        break;
+      // ---------------------
       default:
         if (kDebugMode) print("Unhandled Event: ${eventBody.eventType}");
     }
@@ -263,7 +292,14 @@ class RadioController extends ChangeNotifier {
 
 
   Future<void> _registerForEvents() async {
-    final eventsToRegister = [EventType.HT_STATUS_CHANGED, EventType.HT_SETTINGS_CHANGED, EventType.HT_CH_CHANGED];
+    final eventsToRegister = [
+      EventType.HT_STATUS_CHANGED,
+      EventType.HT_SETTINGS_CHANGED,
+      EventType.HT_CH_CHANGED,
+      // --- ADD THIS ---
+      EventType.DATA_RXD,
+      // ---------------
+    ];
     for (var eventType in eventsToRegister) {
       final command = Message(
         commandGroup: CommandGroup.BASIC,

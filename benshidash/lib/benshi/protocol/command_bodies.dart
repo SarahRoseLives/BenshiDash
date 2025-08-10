@@ -230,6 +230,21 @@ class GetPositionReplyBody extends ReplyBody {
   Uint8List toBytes() => throw UnimplementedError("Reply bodies are not intended to be converted to bytes.");
 }
 
+// --- DATA_RXD EVENT ---
+// Add this class anywhere inside benshi/protocol/command_bodies.dart
+
+class DataRxdEventBody extends MessageBody {
+  final TncDataFragment tncDataFragment;
+  DataRxdEventBody({required this.tncDataFragment});
+
+  factory DataRxdEventBody.fromBytes(Uint8List bytes) {
+    return DataRxdEventBody(tncDataFragment: TncDataFragment.fromBytes(bytes));
+  }
+
+  @override
+  Uint8List toBytes() => throw UnimplementedError("Event bodies are not sent from the app.");
+}
+
 // --- EVENT_NOTIFICATION ---
 class EventNotificationBody extends MessageBody {
   final EventType eventType;
@@ -251,6 +266,11 @@ class EventNotificationBody extends MessageBody {
       case EventType.HT_CH_CHANGED:
         body = ReadRFChReplyBody(replyStatus: ReplyStatus.SUCCESS, rfCh: Channel.fromBytes(remainingBytes));
         break;
+      // --- ADD THIS CASE ---
+      case EventType.DATA_RXD:
+        body = DataRxdEventBody.fromBytes(remainingBytes);
+        break;
+      // --------------------
       // Other events can be added here as needed.
       default:
         body = UnknownBody(data: remainingBytes);
