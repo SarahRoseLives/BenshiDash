@@ -1,5 +1,3 @@
-// ui/screens/scan/scan.dart
-
 import 'package:flutter/material.dart';
 import 'dart:async';
 import '../../../benshi/radio_controller.dart';
@@ -167,7 +165,7 @@ class _ScanScreenState extends State<ScanScreen> {
         } else if (_channels == null || _channels!.isEmpty) {
           content = _buildErrorView(_statusMessage.isNotEmpty ? _statusMessage : 'No channels found.');
         } else {
-          content = _buildChannelGrid();
+          content = _buildChannelGrid(context);
         }
 
         return MainLayout(
@@ -230,77 +228,90 @@ class _ScanScreenState extends State<ScanScreen> {
     );
   }
 
-  Widget _buildChannelGrid() {
+  Widget _buildChannelGrid(BuildContext context) {
+    // --- CHANGE: Make grid always fit 4 rows x 8 columns, so all 32 channels are visible on any device size ---
+    final int totalChannels = _channels?.length ?? 0;
     final int crossAxisCount = 8;
-    final double gridSpacing = 8;
+    final int rowCount = (totalChannels / crossAxisCount).ceil();
 
-    return GridView.builder(
-      padding: EdgeInsets.symmetric(horizontal: gridSpacing),
-      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: crossAxisCount,
-        mainAxisSpacing: gridSpacing,
-        crossAxisSpacing: gridSpacing,
-        // --- CHANGE #2: Adjusted aspect ratio to make cells shorter ---
-        childAspectRatio: 0.95,
-      ),
-      itemCount: _channels?.length ?? 0,
-      itemBuilder: (context, index) {
-        final channel = _channels![index];
-        final isActive = channel.scan;
-        final theme = Theme.of(context);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // Calculate height for 4 rows, reserving some space for the controls at the top
+        final double gridSpacing = 8;
+        final double availableHeight = constraints.maxHeight - (rowCount - 1) * gridSpacing;
+        final double cellHeight = availableHeight / rowCount;
+        final double cellWidth = (constraints.maxWidth - (crossAxisCount - 1) * gridSpacing) / crossAxisCount;
+        final double childAspectRatio = cellWidth / cellHeight;
 
-        return LayoutBuilder(
-          builder: (context, constraints) {
-            final buttonSize = constraints.maxWidth;
-            return GestureDetector(
-              onTap: () => _toggleChannel(channel),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 160),
-                curve: Curves.easeInOut,
-                decoration: BoxDecoration(
-                  color: isActive ? theme.colorScheme.secondary : theme.cardTheme.color,
-                  borderRadius: BorderRadius.circular(buttonSize * 0.2),
-                  border: Border.all(color: theme.dividerColor, width: 1.2),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(2.0),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(
-                        'CH ${channel.channelId+1}',
-                        style: TextStyle(
-                           fontSize: buttonSize * 0.15,
-                           fontWeight: FontWeight.bold,
-                           color: isActive ? theme.colorScheme.onSecondary.withOpacity(0.8) : theme.colorScheme.primary,
-                        ),
+        return GridView.builder(
+          padding: EdgeInsets.symmetric(horizontal: gridSpacing),
+          physics: const NeverScrollableScrollPhysics(), // Prevent scrolling, force fit
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: crossAxisCount,
+            mainAxisSpacing: gridSpacing,
+            crossAxisSpacing: gridSpacing,
+            childAspectRatio: childAspectRatio,
+          ),
+          itemCount: totalChannels,
+          itemBuilder: (context, index) {
+            final channel = _channels![index];
+            final isActive = channel.scan;
+            final theme = Theme.of(context);
+
+            return LayoutBuilder(
+              builder: (context, constraints) {
+                final buttonSize = constraints.maxWidth;
+                return GestureDetector(
+                  onTap: () => _toggleChannel(channel),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 160),
+                    curve: Curves.easeInOut,
+                    decoration: BoxDecoration(
+                      color: isActive ? theme.colorScheme.secondary : theme.cardTheme.color,
+                      borderRadius: BorderRadius.circular(buttonSize * 0.2),
+                      border: Border.all(color: theme.dividerColor, width: 1.2),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(2.0),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            'CH ${channel.channelId + 1}',
+                            style: TextStyle(
+                              fontSize: buttonSize * 0.15,
+                              fontWeight: FontWeight.bold,
+                              color: isActive ? theme.colorScheme.onSecondary.withOpacity(0.8) : theme.colorScheme.primary,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            channel.name.trim().isEmpty ? 'Empty' : channel.name.trim(),
+                            style: TextStyle(
+                              fontSize: buttonSize * 0.18,
+                              fontWeight: FontWeight.bold,
+                              color: isActive ? theme.colorScheme.onSecondary : theme.colorScheme.onSurface.withOpacity(0.9),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            textAlign: TextAlign.center,
+                            maxLines: 1,
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            '${channel.rxFreq.toStringAsFixed(3)}',
+                            style: TextStyle(
+                              fontSize: buttonSize * 0.15,
+                              fontWeight: FontWeight.w500,
+                              color: isActive ? theme.colorScheme.onSecondary.withOpacity(0.9) : theme.colorScheme.onSurface.withOpacity(0.7),
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                        ],
                       ),
-                      const SizedBox(height: 2),
-                      Text(
-                        channel.name.trim().isEmpty ? 'Empty' : channel.name.trim(),
-                        style: TextStyle(
-                          fontSize: buttonSize * 0.18,
-                          fontWeight: FontWeight.bold,
-                          color: isActive ? theme.colorScheme.onSecondary : theme.colorScheme.onSurface.withOpacity(0.9),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        textAlign: TextAlign.center,
-                        maxLines: 1,
-                      ),
-                      const SizedBox(height: 2),
-                       Text(
-                        '${channel.rxFreq.toStringAsFixed(3)}',
-                        style: TextStyle(
-                          fontSize: buttonSize * 0.15,
-                          fontWeight: FontWeight.w500,
-                          color: isActive ? theme.colorScheme.onSecondary.withOpacity(0.9) : theme.colorScheme.onSurface.withOpacity(0.7),
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                    ],
+                    ),
                   ),
-                ),
-              ),
+                );
+              },
             );
           },
         );
