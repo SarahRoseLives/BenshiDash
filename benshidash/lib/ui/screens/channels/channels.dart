@@ -1,5 +1,9 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../../../models/memory_list.dart'; // Corrected path
 import '../../../benshi/protocol/protocol.dart';
 import '../home/dashboard.dart';
 import '../../widgets/main_layout.dart';
@@ -7,36 +11,32 @@ import '../../widgets/main_layout.dart';
 import '../../../benshi/radio_controller.dart';
 import '../../../main.dart'; // To get the global notifier
 
-// This is no longer needed for the screen's initial state but can be kept for predefined memories.
-List<Channel> generateMockChannels() {
-  return List.generate(32, (index) {
-    bool isAm = index < 4;
-    bool isFm = !isAm && index < 20;
+// Helper function to load memory files from assets
+Future<List<Map<String, List<Channel>>>> _loadMemoryAssets() async {
+  try {
+    final manifestContent = await rootBundle.loadString('AssetManifest.json');
+    final Map<String, dynamic> manifestMap = json.decode(manifestContent);
 
-    return Channel(
-      channelId: index,
-      name: 'Channel_${index + 1}',
-      txMod: isAm ? ModulationType.AM : ModulationType.FM,
-      rxMod: isAm ? ModulationType.AM : ModulationType.FM,
-      txFreq: 462.5625 + (index * 0.0125),
-      rxFreq: 462.5625 + (index * 0.0125),
-      txSubAudio: index % 5 == 0 ? 100.0 : null,
-      rxSubAudio: index % 7 == 0 ? 123 : null,
-      txAtMaxPower: index % 3 == 0,
-      txAtMedPower: index % 3 == 1,
-      bandwidth: isFm ? BandwidthType.WIDE : BandwidthType.NARROW,
-      scan: index % 2 == 0,
-      talkAround: index % 8 == 0,
-      txDisable: index == 31,
-    );
-  });
+    // Use the correct path from your screenshot
+    final memoryFilesPaths = manifestMap.keys
+        .where((String key) => key.startsWith('assets/memorylists/') && key.endsWith('.json'))
+        .toList();
+
+    final List<Map<String, List<Channel>>> memoryLists = [];
+    for (final path in memoryFilesPaths) {
+      final jsonString = await rootBundle.loadString(path);
+      final memoryFile = MemoryList.fromJson(json.decode(jsonString));
+      memoryLists.add({memoryFile.name: memoryFile.channels});
+    }
+    return memoryLists;
+  } catch (e) {
+    if (kDebugMode) {
+      print("Error loading memory assets: $e");
+    }
+    return [];
+  }
 }
 
-final List<Map<String, List<Channel>>> predefinedMemories = [
-  {"Family Trip": generateMockChannels()},
-  {"Bay Area Repeaters": generateMockChannels()},
-  {"Work Channels": generateMockChannels()},
-];
 
 class ChannelsScreen extends StatefulWidget {
   const ChannelsScreen({super.key});
@@ -46,24 +46,61 @@ class ChannelsScreen extends StatefulWidget {
 }
 
 class _ChannelsScreenState extends State<ChannelsScreen> {
-  // --- MODIFIED: State variables to handle loading and controller access ---
   List<Channel>? _channels;
   bool _isLoading = true;
   String _statusMessage = 'Initializing...';
   RadioController? _radioController;
   final List<Map<String, List<Channel>>> _savedMemories = [];
+  List<Map<String, List<Channel>>> _predefinedMemories = [];
+
+  // --- NEW: State for memory loading UI ---
+  bool _isSelectingMemory = false;
+  List<Map<String, List<Channel>>> _allMemoryLists = [];
+
 
   @override
   void initState() {
     super.initState();
-    // Get the controller instance from the global notifier
     _radioController = radioControllerNotifier.value;
-    _loadAllChannels();
+    _initializeScreen();
   }
 
-  // --- NEW: Method to load all channels from the radio ---
+  Future<void> _initializeScreen() async {
+    await _loadAllMemoryLists();
+    await _loadAllChannels();
+  }
+
+  // --- NEW: Loads memories from both assets and persistent storage ---
+  Future<void> _loadAllMemoryLists() async {
+    final assetMemories = await _loadMemoryAssets();
+
+    final prefs = await SharedPreferences.getInstance();
+    final savedMemories = <Map<String, List<Channel>>>[];
+    final keys = prefs.getKeys();
+
+    for (final key in keys) {
+      if (key.startsWith('memory_backup_')) {
+        final name = key.replaceFirst('memory_backup_', '');
+        final jsonString = prefs.getString(key);
+        if (jsonString != null) {
+          final List<dynamic> channelJson = json.decode(jsonString);
+          final channels = channelJson.map((c) => Channel.fromJson(c)).toList();
+          savedMemories.add({name: channels});
+        }
+      }
+    }
+
+    if (mounted) {
+      setState(() {
+        _allMemoryLists = [...assetMemories, ...savedMemories];
+      });
+    }
+  }
+
+
   Future<void> _loadAllChannels() async {
-    if (!mounted || _radioController == null) {
+    if (!mounted) return;
+    if (_radioController == null) {
       setState(() {
         _isLoading = false;
         _statusMessage = 'Connect to a radio to program channels.';
@@ -95,7 +132,6 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
     }
   }
 
-  // --- MODIFIED: Edit channel and write changes back to the radio ---
   void _editChannel(int index) async {
     if (_channels == null || _radioController == null) return;
 
@@ -114,10 +150,11 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
 
       try {
         await _radioController!.writeChannel(updatedChannel);
-        setState(() {
-          _channels![index] = updatedChannel;
-          _statusMessage = 'Channel ${updatedChannel.channelId + 1} saved.';
-        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Channel ${updatedChannel.channelId + 1} written. Verifying..."), duration: const Duration(seconds: 1)),
+        );
+        await _loadAllChannels();
+
       } catch (e) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -172,94 +209,61 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
     );
 
     if (name != null && name.isNotEmpty) {
-      setState(() {
-        _savedMemories.add({name: List<Channel>.from(_channels!)});
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Saved backup as '$name'")),
-        );
-      });
+      final prefs = await SharedPreferences.getInstance();
+      final List<Map<String, dynamic>> channelsJson = _channels!.map((c) => c.toJson()).toList();
+      final jsonString = json.encode(channelsJson);
+
+      await prefs.setString('memory_backup_$name', jsonString);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Saved backup as '$name'")),
+      );
+      await _loadAllMemoryLists();
     }
   }
 
-  // --- MODIFIED: Load memories and write the entire list to the radio ---
-  void _showLoadMemoriesDialog() async {
-    if (_radioController == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Connect to a radio first.")),
-      );
-      return;
-    }
+  void _enterMemorySelectionMode() {
+    setState(() {
+      _isSelectingMemory = true;
+    });
+  }
 
-    final List<Map<String, List<Channel>>> allMemories = [
-      ...predefinedMemories,
-      ..._savedMemories,
-    ];
+  Future<void> _loadMemoriesToRadio(List<Channel> channelsToLoad, String name) async {
+    if (_radioController == null) return;
 
-    final List<String> memoryNames = allMemories.map((mem) => mem.keys.first).toList();
+    setState(() {
+      _isLoading = true;
+      _isSelectingMemory = false;
+      _statusMessage = 'Writing ${channelsToLoad.length} channels from "$name"...';
+    });
 
-    final int? selected = await showDialog<int>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text("Load Memories"),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: ListView.builder(
-            shrinkWrap: true,
-            itemCount: memoryNames.length,
-            itemBuilder: (context, idx) => ListTile(
-              title: Text(memoryNames[idx]),
-              trailing: const Icon(Icons.download),
-              onTap: () => Navigator.of(ctx).pop(idx),
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text("Cancel"),
-          ),
-        ],
-      ),
-    );
+    try {
+      for (final channel in channelsToLoad) {
+        await _radioController!.writeChannel(channel);
+        await Future.delayed(const Duration(milliseconds: 60));
+      }
 
-    if (selected != null && selected >= 0 && selected < allMemories.length) {
-      final channelsToLoad = allMemories[selected].values.first;
-      setState(() {
-        _isLoading = true;
-        _statusMessage = 'Writing ${channelsToLoad.length} channels to radio...';
-      });
-
-      try {
-        for (final channel in channelsToLoad) {
-          await _radioController!.writeChannel(channel);
-          await Future.delayed(const Duration(milliseconds: 60)); // Small delay between writes
-        }
-
+      if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Finished writing memories: '$name'")),
+        );
+        await _loadAllChannels();
+      }
+    } catch (e) {
         if (mounted) {
-           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text("Loaded and wrote memories: '${allMemories[selected].keys.first}'")),
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text("Error writing memories: $e")),
           );
-          // Refresh the state from the radio to be certain
-          await _loadAllChannels();
         }
-
-      } catch (e) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text("Error writing memories: $e")),
-            );
-          }
-      } finally {
-        if(mounted) {
-          setState(() { _isLoading = false; });
-        }
+    } finally {
+      if(mounted) {
+        setState(() { _isLoading = false; });
       }
     }
   }
 
+
   void _showImportRepeaterBook() async {
-    // This function remains mock for now as requested.
-    // When implemented, it should also write the new channels to the radio.
     final importedChannels = await showModalBottomSheet<List<Channel>>(
       context: context,
       isScrollControlled: true,
@@ -267,7 +271,6 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
       builder: (ctx) => const _RepeaterBookImportSheet(),
     );
     if (importedChannels != null && importedChannels.isNotEmpty) {
-      // In a real implementation, you would write these channels to the radio here.
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Mock import successful. In a real app, these would now be written to the radio.")),
       );
@@ -277,10 +280,6 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final bool isDark = Theme.of(context).brightness == Brightness.dark;
-    const int crossAxisCount = 8;
-    const int rowCount = 4;
-    const double gridSpacing = 8.0;
 
     return ValueListenableBuilder<RadioController?>(
       valueListenable: radioControllerNotifier,
@@ -292,100 +291,10 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
           gps: gps,
           child: LayoutBuilder(
             builder: (context, constraints) {
-              final double gridWidth = constraints.maxWidth;
-              final double gridHeight = constraints.maxHeight;
-              final double availableWidth = gridWidth - (gridSpacing * (crossAxisCount + 1));
-              final double availableHeight = gridHeight - (gridSpacing * (rowCount + 1));
-              final double buttonWidth = (availableWidth / crossAxisCount).clamp(36.0, 96.0);
-              final double buttonHeight = (availableHeight / rowCount).clamp(36.0, 96.0);
-              final double childAspectRatio = buttonWidth / buttonHeight;
-              final double maxButtonWidth = buttonWidth * 1.5;
-
               return Column(
                 children: [
                   const SizedBox(height: 22),
-                  SizedBox(
-                    width: gridWidth,
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        ConstrainedBox(
-                          constraints: BoxConstraints(maxWidth: maxButtonWidth),
-                          child: SizedBox(
-                            height: 44,
-                            child: ElevatedButton.icon(
-                              icon: const Icon(Icons.import_export),
-                              onPressed: _showImportRepeaterBook,
-                              style: ElevatedButton.styleFrom(
-                                minimumSize: const Size(0, 44),
-                                backgroundColor: theme.colorScheme.secondaryContainer,
-                                foregroundColor: theme.colorScheme.onSecondaryContainer,
-                                shape: const StadiumBorder(),
-                                textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 18),
-                              ),
-                              label: const Text("GPS Import", overflow: TextOverflow.ellipsis),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Center(
-                            child: Text(
-                              'Channel Programming',
-                              style: theme.textTheme.headlineMedium?.copyWith(
-                                color: theme.colorScheme.onBackground,
-                                fontWeight: FontWeight.w700,
-                                fontSize: 32,
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            ConstrainedBox(
-                              constraints: BoxConstraints(maxWidth: maxButtonWidth),
-                              child: SizedBox(
-                                height: 44,
-                                child: ElevatedButton.icon(
-                                  icon: const Icon(Icons.save_alt),
-                                  onPressed: _isLoading ? null : _saveCurrentMemories,
-                                  style: ElevatedButton.styleFrom(
-                                    minimumSize: const Size(0, 44),
-                                    backgroundColor: theme.colorScheme.secondaryContainer,
-                                    foregroundColor: theme.colorScheme.onSecondaryContainer,
-                                    shape: const StadiumBorder(),
-                                    textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 18),
-                                  ),
-                                  label: const Text("Save Backup", overflow: TextOverflow.ellipsis),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            ConstrainedBox(
-                              constraints: BoxConstraints(maxWidth: maxButtonWidth),
-                              child: SizedBox(
-                                height: 44,
-                                child: ElevatedButton.icon(
-                                  icon: const Icon(Icons.folder_open),
-                                  onPressed: _isLoading ? null : _showLoadMemoriesDialog,
-                                  style: ElevatedButton.styleFrom(
-                                    minimumSize: const Size(0, 44),
-                                    backgroundColor: theme.colorScheme.secondaryContainer,
-                                    foregroundColor: theme.colorScheme.onSecondaryContainer,
-                                    shape: const StadiumBorder(),
-                                    textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 18),
-                                  ),
-                                  label: const Text("Load Memories", overflow: TextOverflow.ellipsis),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
+                  _buildHeader(context, constraints.maxWidth),
                   const SizedBox(height: 10),
                   Expanded(
                     child: _isLoading
@@ -399,36 +308,12 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
                               ],
                             ),
                           )
-                        : (_channels == null
-                            ? Center(
-                                child: Text(_statusMessage, style: theme.textTheme.titleMedium),
+                        : _isSelectingMemory
+                            ? _buildMemorySelectionGrid(context)
+                            : (_channels == null
+                                ? Center(child: Text(_statusMessage, style: theme.textTheme.titleMedium))
+                                : _buildChannelGrid(context, constraints)
                               )
-                            : SizedBox(
-                                width: gridWidth,
-                                child: GridView.builder(
-                                  physics: const NeverScrollableScrollPhysics(),
-                                  padding: EdgeInsets.symmetric(horizontal: gridSpacing),
-                                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                                    crossAxisCount: crossAxisCount,
-                                    mainAxisSpacing: gridSpacing,
-                                    crossAxisSpacing: gridSpacing,
-                                    childAspectRatio: childAspectRatio,
-                                  ),
-                                  itemCount: _channels!.length,
-                                  itemBuilder: (context, index) {
-                                    final channel = _channels![index];
-                                    return GestureDetector(
-                                      onTap: () => _editChannel(index),
-                                      child: _ChannelButton(
-                                        channel: channel,
-                                        isDark: isDark,
-                                        theme: theme,
-                                        buttonHeight: buttonHeight,
-                                      ),
-                                    );
-                                  },
-                                ),
-                              )),
                   ),
                 ],
               );
@@ -438,7 +323,212 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
       },
     );
   }
+
+  Widget _buildHeader(BuildContext context, double gridWidth) {
+    final theme = Theme.of(context);
+    final maxButtonWidth = (gridWidth / 4).clamp(100.0, 200.0);
+
+    return SizedBox(
+      width: gridWidth,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          _isSelectingMemory
+          ? ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: maxButtonWidth),
+              child: SizedBox(
+                height: 44,
+                child: ElevatedButton.icon(
+                  icon: const Icon(Icons.cancel),
+                  onPressed: () => setState(() => _isSelectingMemory = false),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: theme.colorScheme.errorContainer,
+                    foregroundColor: theme.colorScheme.onErrorContainer,
+                    shape: const StadiumBorder(),
+                    textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 18),
+                  ),
+                  label: const Text("Cancel"),
+                ),
+              ),
+            )
+          : ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: maxButtonWidth),
+              child: SizedBox(
+                height: 44,
+                child: ElevatedButton.icon(
+                  icon: const Icon(Icons.import_export),
+                  onPressed: _showImportRepeaterBook,
+                  style: ElevatedButton.styleFrom(
+                    minimumSize: const Size(0, 44),
+                    backgroundColor: theme.colorScheme.secondaryContainer,
+                    foregroundColor: theme.colorScheme.onSecondaryContainer,
+                    shape: const StadiumBorder(),
+                    textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 18),
+                  ),
+                  label: const Text("GPS Import", overflow: TextOverflow.ellipsis),
+                ),
+              ),
+            ),
+
+          Expanded(
+            child: Center(
+              child: Text(
+                _isSelectingMemory ? 'Select Memory to Load' : 'Channel Programming',
+                style: theme.textTheme.headlineMedium?.copyWith(
+                  color: theme.colorScheme.onBackground,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 32,
+                ),
+              ),
+            ),
+          ),
+
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: maxButtonWidth),
+                child: SizedBox(
+                  height: 44,
+                  child: ElevatedButton.icon(
+                    icon: const Icon(Icons.save_alt),
+                    onPressed: _isLoading || _isSelectingMemory ? null : _saveCurrentMemories,
+                    style: ElevatedButton.styleFrom(
+                      minimumSize: const Size(0, 44),
+                      backgroundColor: theme.colorScheme.secondaryContainer,
+                      foregroundColor: theme.colorScheme.onSecondaryContainer,
+                      shape: const StadiumBorder(),
+                      textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 18),
+                    ),
+                    label: const Text("Save Backup", overflow: TextOverflow.ellipsis),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: maxButtonWidth),
+                child: SizedBox(
+                  height: 44,
+                  child: ElevatedButton.icon(
+                    icon: const Icon(Icons.folder_open),
+                    onPressed: _isLoading || _isSelectingMemory ? null : _enterMemorySelectionMode,
+                    style: ElevatedButton.styleFrom(
+                      minimumSize: const Size(0, 44),
+                      backgroundColor: theme.colorScheme.secondaryContainer,
+                      foregroundColor: theme.colorScheme.onSecondaryContainer,
+                      shape: const StadiumBorder(),
+                      textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 18),
+                    ),
+                    label: const Text("Load Memories", overflow: TextOverflow.ellipsis),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMemorySelectionGrid(BuildContext context) {
+    const int crossAxisCount = 4;
+    const double gridSpacing = 16.0;
+    final theme = Theme.of(context);
+
+    if (_allMemoryLists.isEmpty) {
+      return const Center(child: Text("No predefined or saved memories found."));
+    }
+
+    return GridView.builder(
+      padding: const EdgeInsets.all(gridSpacing),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: crossAxisCount,
+        mainAxisSpacing: gridSpacing,
+        crossAxisSpacing: gridSpacing,
+        childAspectRatio: 2.5,
+      ),
+      itemCount: _allMemoryLists.length,
+      itemBuilder: (context, index) {
+        final memoryItem = _allMemoryLists[index];
+        final name = memoryItem.keys.first;
+        final channels = memoryItem.values.first;
+        return ElevatedButton(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: theme.cardTheme.color,
+            foregroundColor: theme.colorScheme.onSurface,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: BorderSide(color: theme.dividerColor),
+            ),
+          ),
+          onPressed: () => _loadMemoriesToRadio(channels, name),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                name,
+                textAlign: TextAlign.center,
+                style: theme.textTheme.titleLarge,
+              ),
+              const SizedBox(height: 4),
+              Text(
+                "${channels.length} channels",
+                style: TextStyle(color: theme.colorScheme.onSurfaceVariant),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildChannelGrid(BuildContext context, BoxConstraints constraints) {
+    final theme = Theme.of(context);
+    final bool isDark = theme.brightness == Brightness.dark;
+    const int crossAxisCount = 8;
+    const int rowCount = 4;
+    const double gridSpacing = 8.0;
+
+    final double gridWidth = constraints.maxWidth;
+    final double gridHeight = constraints.maxHeight;
+    final double availableWidth = gridWidth - (gridSpacing * (crossAxisCount + 1));
+    final double availableHeight = gridHeight - (gridSpacing * (rowCount + 1));
+    final double buttonWidth = (availableWidth / crossAxisCount).clamp(36.0, 96.0);
+    final double buttonHeight = (availableHeight / rowCount).clamp(36.0, 96.0);
+    final double childAspectRatio = buttonWidth / buttonHeight;
+
+    return SizedBox(
+      width: gridWidth,
+      child: GridView.builder(
+        physics: const NeverScrollableScrollPhysics(),
+        padding: EdgeInsets.symmetric(horizontal: gridSpacing),
+        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: crossAxisCount,
+          mainAxisSpacing: gridSpacing,
+          crossAxisSpacing: gridSpacing,
+          childAspectRatio: childAspectRatio,
+        ),
+        itemCount: _channels!.length,
+        itemBuilder: (context, index) {
+          final channel = _channels![index];
+          return GestureDetector(
+            onTap: () => _editChannel(index),
+            child: _ChannelButton(
+              channel: channel,
+              isDark: isDark,
+              theme: theme,
+              buttonHeight: buttonHeight,
+            ),
+          );
+        },
+      ),
+    );
+  }
 }
+
+//
+// NO CHANGES BELOW THIS LINE - All other widgets (_ChannelButton, _RepeaterBookImportSheet, _ChannelEditor, etc.) remain the same.
+//
 
 class _ChannelButton extends StatelessWidget {
   final Channel channel;
@@ -512,9 +602,6 @@ class _ChannelButton extends StatelessWidget {
     );
   }
 }
-
-// --- MOCK REPEATERBOOK IMPORT SHEET ---
-// (No changes needed for theme adaptation, so omitted for brevity. See previous versions.)
 
 class _RepeaterBookImportSheet extends StatefulWidget {
   const _RepeaterBookImportSheet();
@@ -682,8 +769,6 @@ class _MockRepeater {
     );
   }
 }
-
-// --- THE EDITOR WIDGET and Helpers remain unchanged below this line ---
 
 class _ChannelEditor extends StatefulWidget {
   final Channel channel;
