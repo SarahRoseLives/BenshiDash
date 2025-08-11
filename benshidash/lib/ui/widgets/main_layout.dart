@@ -1,5 +1,3 @@
-// ui/widgets/main_layout.dart
-
 import 'dart:math';
 import 'package:benshidash/benshi/radio_controller.dart';
 import 'package:benshidash/main.dart';
@@ -153,18 +151,12 @@ class _DesktopLayout extends StatelessWidget {
               label: "Radio Setup",
               onTap: () => _navigateTo(context, const RadioSettingsScreen()),
             ),
-            // --- FIX #1: Removed the incorrect Builder widget ---
+            // --- MODIFIED: Scan menu always navigates, no radio check or connect message ---
             _SidebarItem(
               icon: Icons.settings_input_antenna,
               label: "Scan",
               onTap: () {
-                if (radioController != null) {
-                  _navigateTo(context, const ScanScreen());
-                } else {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Please connect to a radio first.')),
-                  );
-                }
+                _navigateTo(context, const ScanScreen());
               },
             ),
             _SidebarItem(
@@ -221,18 +213,12 @@ class _MobileLayout extends StatelessWidget {
               label: "",
               onTap: () => _navigateTo(context, const RadioSettingsScreen()),
             ),
-            // --- FIX #2: Removed the incorrect Builder widget ---
+            // --- MODIFIED: Scan menu always navigates, no radio check or connect message ---
             _SidebarItem(
               icon: Icons.settings_input_antenna,
               label: "",
               onTap: () {
-                if (radioController != null) {
-                  _navigateTo(context, const ScanScreen());
-                } else {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Please connect to a radio first.')),
-                  );
-                }
+                _navigateTo(context, const ScanScreen());
               },
             ),
             _SidebarItem(

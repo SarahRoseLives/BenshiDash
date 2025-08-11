@@ -1,58 +1,12 @@
+import 'dart:async';
+import 'package:benshidash/models/aprs_packet.dart';
 import 'package:flutter/material.dart';
-import '../../widgets/main_layout.dart';
-import '../home/dashboard.dart'; // For mock header/footer data
-
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
 import '../../../benshi/radio_controller.dart';
 import '../../../main.dart'; // To get the global notifier
-
-// A simple, custom class to hold coordinates. NO external package needed.
-class SimpleLatLng {
-  final double latitude;
-  final double longitude;
-  const SimpleLatLng(this.latitude, this.longitude);
-}
-
-// Simple data class for a mock APRS station using our custom class
-class MockAprsStation {
-  final String callsign;
-  final IconData icon;
-  final Color color;
-  final Offset position; // Positioned from top-left (x, y) as a percentage
-  final String type;
-
-  const MockAprsStation({
-    required this.callsign,
-    required this.icon,
-    required this.color,
-    required this.position,
-    required this.type,
-  });
-}
-
-// Mock Data for the APRS Map
-final List<MockAprsStation> mockStations = [
-  const MockAprsStation(
-    callsign: 'K8JTK-9',
-    icon: Icons.directions_car,
-    color: Colors.lightBlueAccent,
-    position: Offset(0.25, 0.40),
-    type: 'Vehicle',
-  ),
-  const MockAprsStation(
-    callsign: 'W8WKY-1',
-    icon: Icons.router,
-    color: Colors.greenAccent,
-    position: Offset(0.55, 0.20),
-    type: 'Digipeater',
-  ),
-  const MockAprsStation(
-    callsign: 'N8IG-10',
-    icon: Icons.cloudy_snowing,
-    color: Colors.white,
-    position: Offset(0.75, 0.65),
-    type: 'Weather Station',
-  ),
-];
+import '../../widgets/main_layout.dart';
+import '../home/dashboard.dart'; // For mock header/footer data
 
 class AprsScreen extends StatelessWidget {
   const AprsScreen({super.key});
@@ -64,115 +18,147 @@ class AprsScreen extends StatelessWidget {
       valueListenable: radioControllerNotifier,
       builder: (context, radioController, _) {
         return MainLayout(
-          // --- THIS IS THE CHANGE ---
           radioController: radioController,
-          // --- END OF CHANGE ---
           radio: radio,
           battery: battery,
           gps: gps,
-          child: const _AprsContent(),
+          child: radioController == null
+              ? const Center(child: Text("Connect to a radio to view APRS data."))
+              : const _AprsMapContent(),
         );
       },
     );
   }
 }
 
-class _AprsContent extends StatelessWidget {
-  const _AprsContent();
+class _AprsMapContent extends StatefulWidget {
+  const _AprsMapContent();
+
+  @override
+  State<_AprsMapContent> createState() => _AprsMapContentState();
+}
+
+class _AprsMapContentState extends State<_AprsMapContent> {
+  RadioController? _radioController;
+  final MapController _mapController = MapController();
+  List<AprsPacket> _packets = [];
+
+  // Center of Jefferson, OH (zip 44047)
+  static const LatLng _initialCenter = LatLng(41.737, -80.771);
+
+  @override
+  void initState() {
+    super.initState();
+    _radioController = radioControllerNotifier.value;
+    if (_radioController != null) {
+      _packets = _radioController!.aprsPackets;
+      _radioController!.addListener(_onRadioUpdate);
+    }
+  }
+
+  @override
+  void dispose() {
+    _radioController?.removeListener(_onRadioUpdate);
+    super.dispose();
+  }
+
+  void _onRadioUpdate() {
+    if (mounted) {
+      setState(() {
+        // Update the local list of packets from the controller
+        _packets = _radioController?.aprsPackets ?? [];
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    final layout = LayoutData.of(context)!;
-    final fontScale = layout.scale;
     final theme = Theme.of(context);
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Padding(
-          padding: EdgeInsets.only(bottom: 12.0 * fontScale, top: 8.0 * fontScale),
-          child: Center(
-            child: Text(
-              'APRS',
-              style: theme.textTheme.headlineMedium?.copyWith(
-                color: theme.colorScheme.onBackground,
-                fontWeight: FontWeight.bold,
-                fontSize: 24 * fontScale,
-              ),
-            ),
-          ),
+    // Build markers from the current packets list
+    final markers = _packets
+        .where((p) => p.latitude != null && p.longitude != null)
+        .map((packet) {
+      return Marker(
+        width: 80.0,
+        height: 80.0,
+        point: LatLng(packet.latitude!, packet.longitude!),
+        child: _StationMarker(packet: packet),
+      );
+    }).toList();
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(20),
+      child: FlutterMap(
+        mapController: _mapController,
+        options: const MapOptions(
+          initialCenter: _initialCenter,
+          initialZoom: 12.0,
+          minZoom: 5,
+          maxZoom: 18,
         ),
-        Expanded(
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(20 * fontScale),
-            child: Container(
-              decoration: BoxDecoration(
-                color: theme.colorScheme.surface,
-                border: Border.all(color: theme.dividerColor, width: 2.0),
-                borderRadius: BorderRadius.circular(20 * fontScale),
-              ),
-              // FIX: Using LayoutBuilder to get constraints for positioning
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  return Stack(
-                    children: mockStations.map((station) {
-                      // FIX: The Positioned widget is now the direct child of the Stack
-                      return Positioned(
-                        left: constraints.maxWidth * station.position.dx,
-                        top: constraints.maxHeight * station.position.dy,
-                        child: _AprsStationWidget(station: station, fontScale: fontScale),
-                      );
-                    }).toList(),
-                  );
-                },
-              ),
-            ),
+        children: [
+          TileLayer(
+            urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+            userAgentPackageName: 'com.sarahrose.benshidash',
+            // For dark mode, we can apply a color filter to the map tiles
+            tileBuilder: theme.brightness == Brightness.dark
+                ? (context, tileWidget, tile) => ColorFiltered(
+                      colorFilter: const ColorFilter.matrix([
+                        // Invert brightness and apply a blueish tint
+                        -0.8, 0, 0, 0, 230,
+                        0, -0.8, 0, 0, 230,
+                        0, 0, -0.8, 0, 230,
+                        0, 0, 0, 1, 0,
+                      ]),
+                      child: tileWidget,
+                    )
+                : null,
           ),
-        ),
-      ],
+          MarkerLayer(markers: markers),
+        ],
+      ),
     );
   }
 }
 
-class _AprsStationWidget extends StatelessWidget {
-  final MockAprsStation station;
-  final double fontScale;
-
-  const _AprsStationWidget({
-    required this.station,
-    required this.fontScale,
-  });
+/// A widget to display a single station marker on the map.
+class _StationMarker extends StatelessWidget {
+  final AprsPacket packet;
+  const _StationMarker({required this.packet});
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Column(
-      children: [
-        Icon(
-          station.icon,
-          color: station.color,
-          size: 32 * fontScale,
-          shadows: const [Shadow(color: Colors.black, blurRadius: 5.0)],
-        ),
-        SizedBox(height: 4 * fontScale),
-        Container(
-          padding: EdgeInsets.symmetric(horizontal: 6 * fontScale, vertical: 2 * fontScale),
-          decoration: BoxDecoration(
-            color: theme.brightness == Brightness.dark
-                ? Colors.black.withOpacity(0.6)
-                : Colors.white.withOpacity(0.8),
-            borderRadius: BorderRadius.circular(4 * fontScale),
+    return Tooltip(
+      message: '${packet.source}\n${packet.comment ?? ''}',
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            packet.symbolIcon,
+            color: theme.colorScheme.primary,
+            size: 30,
+            shadows: const [Shadow(color: Colors.black, blurRadius: 4.0)],
           ),
-          child: Text(
-            station.callsign,
-            style: TextStyle(
-              color: theme.colorScheme.onSurface,
-              fontSize: 12 * fontScale,
-              fontWeight: FontWeight.bold,
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: Colors.black.withOpacity(0.65),
+              borderRadius: BorderRadius.circular(4),
+              border: Border.all(color: Colors.white.withOpacity(0.5), width: 0.5),
+            ),
+            child: Text(
+              packet.source,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+              ),
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }

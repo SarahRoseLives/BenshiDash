@@ -1,4 +1,4 @@
-import 'package:benshidash/ui/screens/scan/vfo_scan_screen.dart'; // Import the new screen
+import 'package:benshidash/ui/screens/scan/vfo_scan_screen.dart';
 import 'package:flutter/material.dart';
 import 'dart:async';
 import '../../../benshi/radio_controller.dart';
@@ -29,6 +29,12 @@ class _ScanScreenState extends State<ScanScreen> {
     if (_radioController != null) {
       _radioController!.addListener(_onRadioUpdate);
       _loadAllChannels();
+    } else {
+      // --- MODIFIED: Never display a message to connect radio, just load the screen ---
+      setState(() {
+        _isLoading = false;
+        _statusMessage = ''; // No message about connecting
+      });
     }
   }
 
@@ -47,6 +53,13 @@ class _ScanScreenState extends State<ScanScreen> {
     if (_radioController != null) {
       _radioController!.addListener(_onRadioUpdate);
       _loadAllChannels();
+    } else {
+      // --- MODIFIED: Never display a message to connect radio, just load the screen ---
+      setState(() {
+        _isLoading = false;
+        _channels = null; // Clear channels on disconnect
+        _statusMessage = ''; // No message about connecting
+      });
     }
   }
 
@@ -57,7 +70,10 @@ class _ScanScreenState extends State<ScanScreen> {
   }
 
   Future<void> _loadAllChannels() async {
-    if (!mounted || _radioController == null) return;
+    if (!mounted || _radioController == null) {
+      // This case is handled by initState and _onControllerChange
+      return;
+    }
     setState(() {
       _isLoading = true;
       _statusMessage = 'Reading all channels from radio...';
@@ -152,23 +168,24 @@ class _ScanScreenState extends State<ScanScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    // --- MODIFIED: Check connection status once ---
+    final bool isConnected = _radioController != null;
+    final bool isScanning = isConnected && (_radioController?.isScan ?? false);
+    final bool canInteract = isConnected && !_isLoading;
+
+    Widget content;
+
+    if (_isLoading) {
+      content = _buildLoadingView();
+    } else if (!isConnected || _channels == null || _channels!.isEmpty) {
+      content = _buildErrorView(_statusMessage);
+    } else {
+      content = _buildChannelGrid(context);
+    }
 
     return ValueListenableBuilder<RadioController?>(
       valueListenable: radioControllerNotifier,
       builder: (context, radioController, _) {
-        final bool isScanning = radioController?.isScan ?? false;
-        Widget content;
-
-        if (radioController == null) {
-          content = _buildErrorView('Please connect to a radio first.');
-        } else if (_isLoading) {
-          content = _buildLoadingView();
-        } else if (_channels == null || _channels!.isEmpty) {
-          content = _buildErrorView(_statusMessage.isNotEmpty ? _statusMessage : 'No channels found.');
-        } else {
-          content = _buildChannelGrid(context);
-        }
-
         return MainLayout(
           radioController: radioController,
           radio: radio,
@@ -182,7 +199,7 @@ class _ScanScreenState extends State<ScanScreen> {
                 child: Row(
                   children: [
                     ElevatedButton(
-                      onPressed: _isLoading ? null : () => _bulkUpdateScanList(true),
+                      onPressed: canInteract ? () => _bulkUpdateScanList(true) : null,
                       style: ElevatedButton.styleFrom(
                         shape: const StadiumBorder(),
                         backgroundColor: theme.colorScheme.secondaryContainer,
@@ -196,7 +213,7 @@ class _ScanScreenState extends State<ScanScreen> {
                         child: ElevatedButton.icon(
                           icon: Icon(isScanning ? Icons.stop_circle_outlined : Icons.play_circle_outline),
                           label: Text(isScanning ? 'Stop Memory Scan' : 'Start Memory Scan'),
-                          onPressed: _isLoading ? null : _toggleMasterScan,
+                          onPressed: canInteract ? _toggleMasterScan : null,
                           style: ElevatedButton.styleFrom(
                             backgroundColor: isScanning ? Colors.redAccent : Colors.green,
                             foregroundColor: Colors.white,
@@ -206,16 +223,15 @@ class _ScanScreenState extends State<ScanScreen> {
                         ),
                       ),
                     ),
-                    // --- MODIFIED ROW TO INCLUDE VFO SCAN BUTTON ---
                     const SizedBox(width: 8),
                     ElevatedButton.icon(
                       icon: const Icon(Icons.waves),
                       label: const Text('VFO Scan Mode'),
-                      onPressed: _isLoading ? null : () {
+                      onPressed: canInteract ? () {
                         Navigator.of(context).push(
                           MaterialPageRoute(builder: (context) => const VfoScanScreen()),
                         );
-                      },
+                      } : null,
                       style: ElevatedButton.styleFrom(
                         shape: const StadiumBorder(),
                         backgroundColor: theme.colorScheme.primaryContainer,
@@ -225,7 +241,7 @@ class _ScanScreenState extends State<ScanScreen> {
                     ),
                     const SizedBox(width: 8),
                     ElevatedButton(
-                      onPressed: _isLoading ? null : () => _bulkUpdateScanList(false),
+                      onPressed: canInteract ? () => _bulkUpdateScanList(false) : null,
                       style: ElevatedButton.styleFrom(
                         shape: const StadiumBorder(),
                         backgroundColor: theme.colorScheme.secondaryContainer,
@@ -234,7 +250,6 @@ class _ScanScreenState extends State<ScanScreen> {
                       ),
                       child: const Text("Deselect All"),
                     ),
-                    // --- END OF MODIFICATION ---
                   ],
                 ),
               ),
@@ -350,18 +365,23 @@ class _ScanScreenState extends State<ScanScreen> {
   }
 
   Widget _buildErrorView(String message) {
+    // --- MODIFIED: Never display a message to connect the radio, just load the screen ---
+    final bool showRetry = _radioController != null && _channels == null && (message.isNotEmpty && !message.toLowerCase().contains('connect'));
     return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(Icons.error_outline, size: 60, color: Colors.grey),
+          const Icon(Icons.radio, size: 60, color: Colors.grey),
           const SizedBox(height: 16),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16.0),
-            child: Text(message, textAlign: TextAlign.center),
+            child: Text(
+              message,
+              textAlign: TextAlign.center,
+            ),
           ),
           const SizedBox(height: 16),
-          if (_radioController != null)
+          if (showRetry)
             ElevatedButton(onPressed: _loadAllChannels, child: const Text('Retry')),
         ],
       ),

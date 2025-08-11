@@ -2,6 +2,7 @@
 
 import 'dart:async';
 import 'dart:typed_data';
+import '../models/aprs_packet.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_bluetooth_serial/flutter_bluetooth_serial.dart';
 import 'protocol/protocol.dart';
@@ -19,6 +20,9 @@ class RadioController extends ChangeNotifier {
   StreamSubscription? _btStreamSubscription;
   Uint8List _rxBuffer = Uint8List(0);
 
+  // Buffer for reassembling fragmented APRS packets
+  final BytesBuilder _aprsReassemblyBuffer = BytesBuilder();
+
   // --- State Properties ---
   DeviceInfo? deviceInfo;
   StatusExt? status;
@@ -30,7 +34,7 @@ class RadioController extends ChangeNotifier {
   double? batteryVoltage;
   int? batteryLevelAsPercentage;
 
-  List<TncDataFragment> aprsPackets = [];
+  List<AprsPacket> aprsPackets = [];
 
   bool get isReady => deviceInfo != null && status != null && settings != null && channelA != null && channelB != null;
   bool get isPowerOn => status?.isPowerOn ?? true;
@@ -49,7 +53,6 @@ class RadioController extends ChangeNotifier {
   bool isVfoScanning = false;
   double _vfoScanStartFreq = 0.0;
   double _vfoScanEndFreq = 0.0;
-  // --- MODIFIED: Changed from int to num to support 12.5 ---
   num _vfoScanStepKhz = 25;
   double currentVfoFrequencyMhz = 0.0;
   Timer? _vfoScanTimer;
@@ -130,23 +133,42 @@ class RadioController extends ChangeNotifier {
         }
         break;
       case EventType.DATA_RXD:
-        final aprsBody = eventBody.event as DataRxdEventBody;
-        final packet = aprsBody.tncDataFragment;
+        final dataRxdBody = eventBody.event as DataRxdEventBody;
+        final fragment = dataRxdBody.tncDataFragment;
 
-        aprsPackets.add(packet);
+        _aprsReassemblyBuffer.add(fragment.data);
 
-        if (aprsPackets.length > 50) {
-          aprsPackets.removeAt(0);
-        }
+        if (fragment.isFinalFragment) {
+          final fullPacketBytes = _aprsReassemblyBuffer.toBytes();
+          _aprsReassemblyBuffer.clear();
 
-        if (kDebugMode) {
           try {
-             print("APRS/BSS Data Received: ${utf8.decode(packet.data)}");
-          } catch (_) {
-             print("APRS/BSS Binary Data Received: ${packet.data}");
+            final newPacket = AprsPacket.fromAX25Frame(fullPacketBytes);
+
+            // --- FIX: Added a null check before using the newPacket object ---
+            // This ensures we only proceed if parsing was successful.
+            if (newPacket != null) {
+              if (newPacket.latitude != null && newPacket.longitude != null) {
+                final existingIndex = aprsPackets.indexWhere((p) => p.source == newPacket.source);
+
+                if (existingIndex != -1) {
+                  aprsPackets[existingIndex] = newPacket; // Update
+                } else {
+                  aprsPackets.add(newPacket); // Add new
+                }
+
+                if (aprsPackets.length > 100) {
+                  aprsPackets.removeAt(0);
+                }
+                dataChanged = true;
+              }
+            }
+          } catch (e) {
+            if (kDebugMode) {
+              print("Could not decode or parse reassembled APRS packet: $e");
+            }
           }
         }
-        dataChanged = true;
         break;
       default:
         if (kDebugMode) print("Unhandled Event: ${eventBody.eventType}");
@@ -325,7 +347,6 @@ class RadioController extends ChangeNotifier {
     notifyListeners();
   }
 
-  // --- MODIFIED: Changed `stepKhz` parameter from int to num ---
   Future<void> startVfoScan({required double startFreqMhz, required double endFreqMhz, required num stepKhz}) async {
     if (isVfoScanning) return;
     const vfoScanChannelId = 252;
