@@ -1,3 +1,4 @@
+import 'package:benshidash/ui/screens/scan/vfo_scan_screen.dart'; // Import the new screen
 import 'package:flutter/material.dart';
 import 'dart:async';
 import '../../../benshi/radio_controller.dart';
@@ -175,7 +176,6 @@ class _ScanScreenState extends State<ScanScreen> {
           gps: gps,
           child: Column(
             children: [
-              // --- CHANGE #1: Reduced top padding ---
               const SizedBox(height: 12),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 8.0),
@@ -206,6 +206,24 @@ class _ScanScreenState extends State<ScanScreen> {
                         ),
                       ),
                     ),
+                    // --- MODIFIED ROW TO INCLUDE VFO SCAN BUTTON ---
+                    const SizedBox(width: 8),
+                    ElevatedButton.icon(
+                      icon: const Icon(Icons.waves),
+                      label: const Text('VFO Scan Mode'),
+                      onPressed: _isLoading ? null : () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(builder: (context) => const VfoScanScreen()),
+                        );
+                      },
+                      style: ElevatedButton.styleFrom(
+                        shape: const StadiumBorder(),
+                        backgroundColor: theme.colorScheme.primaryContainer,
+                        foregroundColor: theme.colorScheme.onPrimaryContainer,
+                        textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
                     ElevatedButton(
                       onPressed: _isLoading ? null : () => _bulkUpdateScanList(false),
                       style: ElevatedButton.styleFrom(
@@ -216,6 +234,7 @@ class _ScanScreenState extends State<ScanScreen> {
                       ),
                       child: const Text("Deselect All"),
                     ),
+                    // --- END OF MODIFICATION ---
                   ],
                 ),
               ),
@@ -229,14 +248,12 @@ class _ScanScreenState extends State<ScanScreen> {
   }
 
   Widget _buildChannelGrid(BuildContext context) {
-    // --- CHANGE: Make grid always fit 4 rows x 8 columns, so all 32 channels are visible on any device size ---
     final int totalChannels = _channels?.length ?? 0;
     final int crossAxisCount = 8;
     final int rowCount = (totalChannels / crossAxisCount).ceil();
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        // Calculate height for 4 rows, reserving some space for the controls at the top
         final double gridSpacing = 8;
         final double availableHeight = constraints.maxHeight - (rowCount - 1) * gridSpacing;
         final double cellHeight = availableHeight / rowCount;
@@ -245,7 +262,7 @@ class _ScanScreenState extends State<ScanScreen> {
 
         return GridView.builder(
           padding: EdgeInsets.symmetric(horizontal: gridSpacing),
-          physics: const NeverScrollableScrollPhysics(), // Prevent scrolling, force fit
+          physics: const NeverScrollableScrollPhysics(),
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: crossAxisCount,
             mainAxisSpacing: gridSpacing,

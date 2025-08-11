@@ -30,9 +30,7 @@ class RadioController extends ChangeNotifier {
   double? batteryVoltage;
   int? batteryLevelAsPercentage;
 
-  // --- ADD THIS ---
   List<TncDataFragment> aprsPackets = [];
-  // ----------------
 
   bool get isReady => deviceInfo != null && status != null && settings != null && channelA != null && channelB != null;
   bool get isPowerOn => status?.isPowerOn ?? true;
@@ -51,7 +49,8 @@ class RadioController extends ChangeNotifier {
   bool isVfoScanning = false;
   double _vfoScanStartFreq = 0.0;
   double _vfoScanEndFreq = 0.0;
-  int _vfoScanStepKhz = 25;
+  // --- MODIFIED: Changed from int to num to support 12.5 ---
+  num _vfoScanStepKhz = 25;
   double currentVfoFrequencyMhz = 0.0;
   Timer? _vfoScanTimer;
 
@@ -130,21 +129,17 @@ class RadioController extends ChangeNotifier {
             dataChanged = true;
         }
         break;
-      // --- ADD THIS CASE ---
       case EventType.DATA_RXD:
         final aprsBody = eventBody.event as DataRxdEventBody;
         final packet = aprsBody.tncDataFragment;
 
-        // Add the new packet to the list
         aprsPackets.add(packet);
 
-        // Optional: To prevent the list from growing forever, keep only the last 50 packets.
         if (aprsPackets.length > 50) {
           aprsPackets.removeAt(0);
         }
 
         if (kDebugMode) {
-          // You can use utf8.decode for APRS text, but be careful as some data is binary.
           try {
              print("APRS/BSS Data Received: ${utf8.decode(packet.data)}");
           } catch (_) {
@@ -153,7 +148,6 @@ class RadioController extends ChangeNotifier {
         }
         dataChanged = true;
         break;
-      // ---------------------
       default:
         if (kDebugMode) print("Unhandled Event: ${eventBody.eventType}");
     }
@@ -296,9 +290,7 @@ class RadioController extends ChangeNotifier {
       EventType.HT_STATUS_CHANGED,
       EventType.HT_SETTINGS_CHANGED,
       EventType.HT_CH_CHANGED,
-      // --- ADD THIS ---
       EventType.DATA_RXD,
-      // ---------------
     ];
     for (var eventType in eventsToRegister) {
       final command = Message(
@@ -312,17 +304,13 @@ class RadioController extends ChangeNotifier {
     }
   }
 
-  Future<Channel> getVfoChannel() async {
-    const vfoChannelId = 0;
-    return await getChannel(vfoChannelId);
-  }
-
   Future<void> setVfoFrequency(double frequencyMhz) async {
+    const vfoScanChannelId = 252;
     final Channel vfoChannel;
     try {
-      vfoChannel = await getChannel(0);
+      vfoChannel = await getChannel(vfoScanChannelId);
     } catch (e) {
-      if (kDebugMode) print("Could not read VFO channel 0 to update it: $e");
+      if (kDebugMode) print("Could not read VFO channel $vfoScanChannelId to update it: $e");
       return;
     }
 
@@ -333,17 +321,19 @@ class RadioController extends ChangeNotifier {
 
     await writeChannel(updatedVfoChannel);
 
-    currentChannel = updatedVfoChannel;
     currentVfoFrequencyMhz = frequencyMhz;
     notifyListeners();
   }
 
-  Future<void> startVfoScan({required double startFreqMhz, required double endFreqMhz, required int stepKhz}) async {
+  // --- MODIFIED: Changed `stepKhz` parameter from int to num ---
+  Future<void> startVfoScan({required double startFreqMhz, required double endFreqMhz, required num stepKhz}) async {
     if (isVfoScanning) return;
+    const vfoScanChannelId = 252;
 
     if (settings == null) await getSettings();
     if (settings == null) return;
-    final newSettings = settings!.copyWith(vfoX: 1);
+
+    final newSettings = settings!.copyWith(vfoX: 1, channelA: vfoScanChannelId);
     await writeSettings(newSettings);
     await Future.delayed(const Duration(milliseconds: 100));
 
@@ -356,7 +346,7 @@ class RadioController extends ChangeNotifier {
     await setVfoFrequency(currentVfoFrequencyMhz);
 
     _vfoScanTimer?.cancel();
-    _vfoScanTimer = Timer.periodic(const Duration(milliseconds: 250), (timer) {
+    _vfoScanTimer = Timer.periodic(const Duration(milliseconds: 250), (timer) async {
       if (!isVfoScanning || (status?.isSq ?? false)) {
         return;
       }
@@ -366,7 +356,7 @@ class RadioController extends ChangeNotifier {
         currentVfoFrequencyMhz = _vfoScanStartFreq;
       }
 
-      setVfoFrequency(currentVfoFrequencyMhz);
+      await setVfoFrequency(currentVfoFrequencyMhz);
     });
 
     notifyListeners();
@@ -512,17 +502,6 @@ class RadioController extends ChangeNotifier {
       }
     }
     return channels;
-  }
-
-  Future<void> scanFrequencies(List<double> frequencies, {Duration dwell = const Duration(milliseconds: 250), bool stopOnCarrier = false}) async {
-    for (final freq in frequencies) {
-      if (stopOnCarrier && (isInRx || isInTx)) {
-        break;
-      }
-      await setVfoFrequency(freq);
-      await Future.delayed(dwell);
-      await getStatus();
-    }
   }
 
   Future<void> setRadioScan(bool enable) async {
