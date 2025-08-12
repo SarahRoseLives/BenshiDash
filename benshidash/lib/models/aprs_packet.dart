@@ -31,50 +31,66 @@ class AprsPacket {
     this.symbolCode,
   });
 
-  /// --- MODIFIED: This factory is now more robust against different APRS formats ---
-  /// It parses a raw binary AX.25 frame from the radio.
   static AprsPacket? fromAX25Frame(Uint8List frameBytes) {
     try {
-      if (frameBytes.length < 16) {
-        // Frame is too short to contain a valid header and UI Frame identifiers.
-        return null;
+      if (frameBytes.length < 14) return null;
+
+      final destAddressBytes = frameBytes.sublist(0, 7);
+      final sourceAddressBytes = frameBytes.sublist(7, 14);
+      final destination = _decodeAX25Address(destAddressBytes);
+      final source = _decodeAX25Address(sourceAddressBytes);
+
+      final path = <String>[];
+      int pathEndIndex = 14;
+
+      for (int i = 14; i < frameBytes.length - 1; i += 7) {
+        if (i + 7 > frameBytes.length) {
+            pathEndIndex = i;
+            break;
+        }
+        final digiBytes = frameBytes.sublist(i, i + 7);
+        path.add(_decodeAX25Address(digiBytes));
+        if ((digiBytes[6] & 0x01) == 1) {
+          pathEndIndex = i + 7;
+          break;
+        }
       }
 
-      // The source callsign is the second 7-byte address field.
-      final sourceAddressBytes = frameBytes.sublist(7, 14);
-      final sourceCallsign = _decodeAX25Address(sourceAddressBytes);
-
-      // The APRS information payload follows a control byte (0x03) and protocol ID (0xF0).
-      // This is the standard way to identify the start of the APRS data.
       int infoStartIndex = -1;
-      for (int i = 14; i < frameBytes.length - 1; i++) {
-        if (frameBytes[i] == 0x03 && frameBytes[i + 1] == 0xF0) {
+      for (int i = pathEndIndex; i < frameBytes.length - 1; i++) {
+        if (frameBytes[i] == 0x03 && frameBytes[i+1] == 0xF0) {
           infoStartIndex = i + 2;
           break;
         }
       }
 
-      // If we didn't find the UI Frame identifier, it's not a packet we can parse.
-      if (infoStartIndex == -1) {
-        return null;
-      }
+      if (infoStartIndex == -1) return null;
 
       final bodyString = ascii.decode(frameBytes.sublist(infoStartIndex));
 
-      // Reconstruct a string that our existing string parser can handle.
-      final parsableString = '$sourceCallsign>APRSTARGET:$bodyString';
+      final constructedRaw = '$source>$destination,${path.join(',')}:$bodyString';
+      final packet = AprsPacket.fromString(constructedRaw);
 
-      // Reuse the simple string parser for the info field content.
-      return AprsPacket.fromString(parsableString);
+      if (packet == null) return null;
+
+      return AprsPacket(
+        raw: packet.raw,
+        source: packet.source,
+        destination: packet.destination,
+        path: path,
+        body: packet.body,
+        latitude: packet.latitude,
+        longitude: packet.longitude,
+        symbolTable: packet.symbolTable,
+        symbolCode: packet.symbolCode,
+        comment: packet.comment
+      );
 
     } catch (e) {
-      // If any part of the parsing fails (invalid characters, etc.),
-      // just ignore the packet instead of crashing.
       return null;
     }
   }
 
-  /// Decodes a 7-byte AX.25 address field (callsign + SSID).
   static String _decodeAX25Address(Uint8List addressBytes) {
     final chars = <String>[];
     for (int i = 0; i < 6; i++) {
@@ -91,7 +107,6 @@ class AprsPacket {
     return ssid > 0 ? '$callsign-$ssid' : callsign;
   }
 
-  /// A very basic parser for APRS position reports from a string.
   static AprsPacket? fromString(String raw) {
     try {
       final parts = raw.split(':');
@@ -106,15 +121,14 @@ class AprsPacket {
       final source = headerParts[0];
       final destAndPath = headerParts[1].split(',');
       final destination = destAndPath[0];
+      // --- FIX: Ensure path from string is correctly assigned ---
       final path = destAndPath.length > 1 ? destAndPath.sublist(1) : <String>[];
 
-      // Check for different position report formats
       final dataType = body.isNotEmpty ? body[0] : '';
       if ((dataType == '!' || dataType == '=' || dataType == '/' || dataType == '@') && body.length >= 18) {
         String latStr, lonStr, table, code;
         String? comment;
 
-        // Uncompressed format: !DDMM.mmN/DDDMM.mmW#
         if (dataType == '!' || dataType == '=') {
           latStr = body.substring(1, 9);
           lonStr = body.substring(10, 19);
@@ -122,15 +136,14 @@ class AprsPacket {
           code = body.substring(19, 20);
           comment = body.length > 20 ? body.substring(20) : '';
         }
-        // Compressed format: /DDMM.mmN#DDDMM.mmW#
         else if(dataType == '/' || dataType == '@') {
           latStr = body.substring(1, 9);
           lonStr = body.substring(10, 19);
-          table = body.substring(0,1); // Symbol table is part of the data type
+          table = body.substring(0,1);
           code = body.substring(9,10);
           comment = body.length > 19 ? body.substring(19) : '';
         } else {
-            return null; // Not a format we can handle
+            return null;
         }
 
         double? parseCoord(String coord, int degLen) {
@@ -161,7 +174,6 @@ class AprsPacket {
         }
       }
 
-      // If not a position packet, return a basic packet
       return AprsPacket(
         raw: raw,
         source: source,

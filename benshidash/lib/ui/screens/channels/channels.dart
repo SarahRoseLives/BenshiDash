@@ -1,23 +1,25 @@
 import 'dart:convert';
+import 'package:benshidash/models/repeater.dart';
+import 'package:benshidash/services/location_service.dart';
+import 'package:benshidash/services/repeaterbook_service.dart';
+import 'package:benshidash/ui/screens/settings/settings.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
+import 'package:geolocator/geolocator.dart' as geolocator;
 import 'package:shared_preferences/shared_preferences.dart';
-import '../../../models/memory_list.dart'; // Corrected path
+import '../../../models/memory_list.dart';
 import '../../../benshi/protocol/protocol.dart';
 import '../home/dashboard.dart';
 import '../../widgets/main_layout.dart';
-
 import '../../../benshi/radio_controller.dart';
-import '../../../main.dart'; // To get the global notifier
+import '../../../main.dart';
 
-// Helper function to load memory files from assets
 Future<List<Map<String, List<Channel>>>> _loadMemoryAssets() async {
   try {
     final manifestContent = await rootBundle.loadString('AssetManifest.json');
     final Map<String, dynamic> manifestMap = json.decode(manifestContent);
 
-    // Use the correct path from your screenshot
     final memoryFilesPaths = manifestMap.keys
         .where((String key) => key.startsWith('assets/memorylists/') && key.endsWith('.json'))
         .toList();
@@ -50,10 +52,6 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
   bool _isLoading = true;
   String _statusMessage = 'Initializing...';
   RadioController? _radioController;
-  final List<Map<String, List<Channel>>> _savedMemories = [];
-  List<Map<String, List<Channel>>> _predefinedMemories = [];
-
-  // --- NEW: State for memory loading UI ---
   bool _isSelectingMemory = false;
   List<Map<String, List<Channel>>> _allMemoryLists = [];
 
@@ -70,10 +68,8 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
     await _loadAllChannels();
   }
 
-  // --- NEW: Loads memories from both assets and persistent storage ---
   Future<void> _loadAllMemoryLists() async {
     final assetMemories = await _loadMemoryAssets();
-
     final prefs = await SharedPreferences.getInstance();
     final savedMemories = <Map<String, List<Channel>>>[];
     final keys = prefs.getKeys();
@@ -96,7 +92,6 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
       });
     }
   }
-
 
   Future<void> _loadAllChannels() async {
     if (!mounted) return;
@@ -151,21 +146,21 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
       try {
         await _radioController!.writeChannel(updatedChannel);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Channel ${updatedChannel.channelId + 1} written. Verifying..."), duration: const Duration(seconds: 1)),
+          SnackBar(content: Text("Channel ${updatedChannel.channelId + 1} written."), duration: const Duration(seconds: 1)),
         );
-        await _loadAllChannels();
-
+        // Optimistically update local state instead of reloading all
+        if (mounted) {
+          setState(() {
+            _channels![index] = updatedChannel;
+            _isLoading = false;
+          });
+        }
       } catch (e) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text("Failed to save channel: $e")),
           );
-        }
-      } finally {
-        if (mounted) {
-          setState(() {
-            _isLoading = false;
-          });
+          setState(() => _isLoading = false);
         }
       }
     }
@@ -192,10 +187,7 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
           ),
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text("Cancel"),
-          ),
+          TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text("Cancel")),
           ElevatedButton(
             onPressed: () {
               if (nameController.text.isNotEmpty) {
@@ -212,9 +204,7 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
       final prefs = await SharedPreferences.getInstance();
       final List<Map<String, dynamic>> channelsJson = _channels!.map((c) => c.toJson()).toList();
       final jsonString = json.encode(channelsJson);
-
       await prefs.setString('memory_backup_$name', jsonString);
-
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text("Saved backup as '$name'")),
       );
@@ -242,9 +232,8 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
         await _radioController!.writeChannel(channel);
         await Future.delayed(const Duration(milliseconds: 60));
       }
-
       if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
+        ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text("Finished writing memories: '$name'")),
         );
         await _loadAllChannels();
@@ -262,20 +251,73 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
     }
   }
 
-
-  void _showImportRepeaterBook() async {
-    final importedChannels = await showModalBottomSheet<List<Channel>>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => const _RepeaterBookImportSheet(),
-    );
-    if (importedChannels != null && importedChannels.isNotEmpty) {
+  Future<void> _importNearbyRepeaters() async {
+    if (_radioController == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Mock import successful. In a real app, these would now be written to the radio.")),
+        const SnackBar(content: Text("Connect to a radio first.")),
       );
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+      _statusMessage = 'Finding nearby repeaters...';
+    });
+
+    try {
+      geolocator.Position position;
+      if (kDebugMode && gpsSourceNotifier.value == GpsSource.debug) {
+        position = LocationService.debugPosition;
+      } else {
+        position = await locationService.determinePosition();
+      }
+
+      final repeaterService = RepeaterBookService();
+      final repeaters = await repeaterService.getRepeatersNearby(
+        latitude: position.latitude,
+        longitude: position.longitude,
+      );
+
+      if (repeaters.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("No nearby repeaters found.")),
+          );
+        }
+        return;
+      }
+
+      final channelsToWrite = <Channel>[];
+      for (int i = 0; i < repeaters.length; i++) {
+        channelsToWrite.add(repeaters[i].toChannel(i));
+      }
+
+      for (int i = 0; i < channelsToWrite.length; i++) {
+        if (mounted) {
+          setState(() {
+            _statusMessage = 'Writing channel ${i + 1}/${channelsToWrite.length}...';
+          });
+        }
+        await _radioController!.writeChannel(channelsToWrite[i]);
+        await Future.delayed(const Duration(milliseconds: 60));
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("${channelsToWrite.length} channels imported successfully!")),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Error during import: $e")),
+        );
+      }
+    } finally {
+      await _loadAllChannels();
     }
   }
+
 
   @override
   Widget build(BuildContext context) {
@@ -356,8 +398,8 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
               child: SizedBox(
                 height: 44,
                 child: ElevatedButton.icon(
-                  icon: const Icon(Icons.import_export),
-                  onPressed: _showImportRepeaterBook,
+                  icon: const Icon(Icons.travel_explore),
+                  onPressed: _importNearbyRepeaters,
                   style: ElevatedButton.styleFrom(
                     minimumSize: const Size(0, 44),
                     backgroundColor: theme.colorScheme.secondaryContainer,
@@ -465,16 +507,9 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Text(
-                name,
-                textAlign: TextAlign.center,
-                style: theme.textTheme.titleLarge,
-              ),
+              Text(name, textAlign: TextAlign.center, style: theme.textTheme.titleLarge),
               const SizedBox(height: 4),
-              Text(
-                "${channels.length} channels",
-                style: TextStyle(color: theme.colorScheme.onSurfaceVariant),
-              ),
+              Text("${channels.length} channels", style: TextStyle(color: theme.colorScheme.onSurfaceVariant)),
             ],
           ),
         );
@@ -526,10 +561,6 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
   }
 }
 
-//
-// NO CHANGES BELOW THIS LINE - All other widgets (_ChannelButton, _RepeaterBookImportSheet, _ChannelEditor, etc.) remain the same.
-//
-
 class _ChannelButton extends StatelessWidget {
   final Channel channel;
   final bool isDark;
@@ -555,10 +586,7 @@ class _ChannelButton extends StatelessWidget {
         decoration: BoxDecoration(
           color: theme.cardTheme.color ?? (isDark ? const Color(0xFF181C1F) : Colors.white),
           borderRadius: BorderRadius.circular(buttonHeight * 0.18),
-          border: Border.all(
-            color: borderColor,
-            width: 1.2,
-          ),
+          border: Border.all(color: borderColor, width: 1.2),
         ),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 4),
@@ -567,11 +595,7 @@ class _ChannelButton extends StatelessWidget {
             children: [
               Text(
                 'CH ${channel.channelId + 1}',
-                style: TextStyle(
-                  fontSize: buttonHeight * 0.18,
-                  fontWeight: FontWeight.bold,
-                  color: titleColor,
-                ),
+                style: TextStyle(fontSize: buttonHeight * 0.18, fontWeight: FontWeight.bold, color: titleColor),
               ),
               const SizedBox(height: 2),
               Text(
@@ -588,11 +612,7 @@ class _ChannelButton extends StatelessWidget {
               ),
               Text(
                 channel.rxFreq.toStringAsFixed(2),
-                style: TextStyle(
-                  fontSize: buttonHeight * 0.15,
-                  fontWeight: FontWeight.w500,
-                  color: subColor,
-                ),
+                style: TextStyle(fontSize: buttonHeight * 0.15, fontWeight: FontWeight.w500, color: subColor),
                 textAlign: TextAlign.center,
               ),
             ],
@@ -603,172 +623,6 @@ class _ChannelButton extends StatelessWidget {
   }
 }
 
-class _RepeaterBookImportSheet extends StatefulWidget {
-  const _RepeaterBookImportSheet();
-
-  @override
-  State<_RepeaterBookImportSheet> createState() => _RepeaterBookImportSheetState();
-}
-
-class _RepeaterBookImportSheetState extends State<_RepeaterBookImportSheet> {
-  final List<_MockRepeater> _repeaters = [
-    _MockRepeater(
-      name: "Local 146.940-",
-      rxFreq: 146.94,
-      txFreq: 146.34,
-      rxTone: 100.0,
-      txTone: 100.0,
-      city: "Springfield",
-      band: "2m",
-    ),
-    _MockRepeater(
-      name: "Metropolis 147.120+",
-      rxFreq: 147.12,
-      txFreq: 147.72,
-      rxTone: 123.0,
-      txTone: 123.0,
-      city: "Metropolis",
-      band: "2m",
-    ),
-    _MockRepeater(
-      name: "UHF 443.800+",
-      rxFreq: 443.8,
-      txFreq: 448.8,
-      rxTone: 114.8,
-      txTone: 114.8,
-      city: "Smallville",
-      band: "70cm",
-    ),
-    _MockRepeater(
-      name: "444.925+",
-      rxFreq: 444.925,
-      txFreq: 449.925,
-      rxTone: 131.8,
-      txTone: 131.8,
-      city: "Shelbyville",
-      band: "70cm",
-    ),
-    _MockRepeater(
-      name: "Simplex 146.520",
-      rxFreq: 146.52,
-      txFreq: 146.52,
-      rxTone: null,
-      txTone: null,
-      city: "Anywhere",
-      band: "2m",
-    ),
-  ];
-
-  final Set<int> _selected = {};
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return DraggableScrollableSheet(
-      expand: false,
-      initialChildSize: 0.8,
-      maxChildSize: 0.9,
-      builder: (context, scrollController) {
-        return Container(
-          decoration: BoxDecoration(
-            color: theme.scaffoldBackgroundColor,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-          ),
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text("Import Repeaters (Mock)", style: theme.textTheme.headlineSmall),
-              const SizedBox(height: 10),
-              Expanded(
-                child: ListView.builder(
-                  controller: scrollController,
-                  itemCount: _repeaters.length,
-                  itemBuilder: (context, i) {
-                    final r = _repeaters[i];
-                    return CheckboxListTile(
-                      value: _selected.contains(i),
-                      title: Text('${r.name} (${r.city})'),
-                      subtitle: Text('${r.band}  RX: ${r.rxFreq}  TX: ${r.txFreq}'
-                          '${r.rxTone != null ? "  Tone: ${r.rxTone}" : ""}'),
-                      onChanged: (checked) {
-                        setState(() {
-                          if (checked == true) {
-                            _selected.add(i);
-                          } else {
-                            _selected.remove(i);
-                          }
-                        });
-                      },
-                    );
-                  },
-                ),
-              ),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  TextButton(
-                    onPressed: () => Navigator.of(context).pop(),
-                    child: const Text('Cancel'),
-                  ),
-                  const SizedBox(width: 8),
-                  ElevatedButton.icon(
-                    icon: const Icon(Icons.download),
-                    onPressed: _selected.isEmpty
-                        ? null
-                        : () {
-                            Navigator.of(context).pop(_selected.map((i) => _repeaters[i].toChannel(i)).toList());
-                          },
-                    label: const Text('Import Selected'),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-}
-
-class _MockRepeater {
-  final String name;
-  final double rxFreq;
-  final double txFreq;
-  final double? rxTone;
-  final double? txTone;
-  final String city;
-  final String band;
-
-  _MockRepeater({
-    required this.name,
-    required this.rxFreq,
-    required this.txFreq,
-    this.rxTone,
-    this.txTone,
-    required this.city,
-    required this.band,
-  });
-
-  Channel toChannel(int idx) {
-    return Channel(
-      channelId: idx,
-      name: name.padRight(10).substring(0, 10),
-      txMod: ModulationType.FM,
-      rxMod: ModulationType.FM,
-      txFreq: txFreq,
-      rxFreq: rxFreq,
-      txSubAudio: txTone,
-      rxSubAudio: rxTone,
-      txAtMaxPower: true,
-      txAtMedPower: false,
-      bandwidth: BandwidthType.WIDE,
-      scan: true,
-      talkAround: false,
-      txDisable: false,
-    );
-  }
-}
 
 class _ChannelEditor extends StatefulWidget {
   final Channel channel;
@@ -896,10 +750,7 @@ class _ChannelEditorState extends State<_ChannelEditor> {
                             Row(
                                 mainAxisAlignment: MainAxisAlignment.end,
                                 children: [
-                                    TextButton(
-                                        onPressed: () => Navigator.of(context).pop(),
-                                        child: const Text('Cancel'),
-                                    ),
+                                    TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
                                     const SizedBox(width: 8),
                                     ElevatedButton.icon(
                                         icon: const Icon(Icons.save),

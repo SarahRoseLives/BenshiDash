@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'package:benshidash/models/aprs_packet.dart';
+import 'package:benshidash/services/location_service.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -7,13 +9,13 @@ import '../../../benshi/radio_controller.dart';
 import '../../../main.dart'; // To get the global notifier
 import '../../widgets/main_layout.dart';
 import '../home/dashboard.dart'; // For mock header/footer data
+import '../settings/settings.dart'; // Import settings to access the notifier
 
 class AprsScreen extends StatelessWidget {
   const AprsScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
-    // Listen for connection status changes from the global notifier
     return ValueListenableBuilder<RadioController?>(
       valueListenable: radioControllerNotifier,
       builder: (context, radioController, _) {
@@ -42,9 +44,11 @@ class _AprsMapContentState extends State<_AprsMapContent> {
   RadioController? _radioController;
   final MapController _mapController = MapController();
   List<AprsPacket> _packets = [];
+  List<Polyline> _pathPolylines = [];
 
-  // Center of Jefferson, OH (zip 44047)
+  // Default center if no GPS is available yet
   static const LatLng _initialCenter = LatLng(41.737, -80.771);
+  LatLng _currentCenter = _initialCenter;
 
   @override
   void initState() {
@@ -52,30 +56,100 @@ class _AprsMapContentState extends State<_AprsMapContent> {
     _radioController = radioControllerNotifier.value;
     if (_radioController != null) {
       _packets = _radioController!.aprsPackets;
-      _radioController!.addListener(_onRadioUpdate);
+      _radioController!.addListener(_onDataUpdate);
     }
+    // Listen for changes from all relevant sources
+    showAprsPathsNotifier.addListener(_onDataUpdate);
+    gpsSourceNotifier.addListener(_onDataUpdate);
+    locationService.addListener(_onDataUpdate);
   }
 
   @override
   void dispose() {
-    _radioController?.removeListener(_onRadioUpdate);
+    _radioController?.removeListener(_onDataUpdate);
+    showAprsPathsNotifier.removeListener(_onDataUpdate);
+    gpsSourceNotifier.removeListener(_onDataUpdate);
+    locationService.removeListener(_onDataUpdate);
     super.dispose();
   }
 
-  void _onRadioUpdate() {
+  /// A single update handler for all data changes.
+  void _onDataUpdate() {
     if (mounted) {
       setState(() {
-        // Update the local list of packets from the controller
         _packets = _radioController?.aprsPackets ?? [];
+        _updateCurrentCenter();
+        _updatePathLines();
       });
+    }
+  }
+
+  void _updateCurrentCenter() {
+    LatLng? newCenter;
+
+    // --- MODIFIED: Added debug case ---
+    if (gpsSourceNotifier.value == GpsSource.device && locationService.currentPosition != null) {
+      final pos = locationService.currentPosition!;
+      newCenter = LatLng(pos.latitude, pos.longitude);
+    } else if (gpsSourceNotifier.value == GpsSource.radio && _radioController?.gps != null) {
+      final pos = _radioController!.gps!;
+      newCenter = LatLng(pos.latitude, pos.longitude);
+    } else if (kDebugMode && gpsSourceNotifier.value == GpsSource.debug) {
+      final pos = LocationService.debugPosition;
+      newCenter = LatLng(pos.latitude, pos.longitude);
+    }
+
+    if (newCenter != null && newCenter != _currentCenter) {
+      _currentCenter = newCenter;
+      _mapController.move(_currentCenter, _mapController.camera.zoom);
+    }
+  }
+
+  void _updatePathLines() {
+    _pathPolylines = [];
+    final latestPacket = _radioController?.latestAprsPacket;
+    if (!showAprsPathsNotifier.value || latestPacket == null || latestPacket.path.isEmpty) {
+      return;
+    }
+
+    AprsPacket? sourcePacket;
+    try {
+      sourcePacket = _packets.firstWhere((p) => p.source == latestPacket.source);
+    } catch(e) { /* not found */ }
+
+    if (sourcePacket?.latitude == null) return;
+
+    final pathPoints = <LatLng>[
+      LatLng(sourcePacket!.latitude!, sourcePacket.longitude!),
+    ];
+
+    for (final callsign in latestPacket.path) {
+      final cleanCallsign = callsign.replaceAll('*', '');
+      AprsPacket? digipeaterPacket;
+      try {
+        digipeaterPacket = _packets.firstWhere((p) => p.source == cleanCallsign);
+      } catch (e) { /* not found */ }
+
+      if (digipeaterPacket?.latitude != null) {
+        pathPoints.add(LatLng(digipeaterPacket!.latitude!, digipeaterPacket.longitude!));
+        break;
+      }
+    }
+
+    if (pathPoints.length > 1) {
+      _pathPolylines.add(
+        Polyline(
+          points: pathPoints,
+          color: Colors.orange.withOpacity(0.8),
+          strokeWidth: 3.0,
+        ),
+      );
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-
-    // Build markers from the current packets list
     final markers = _packets
         .where((p) => p.latitude != null && p.longitude != null)
         .map((packet) {
@@ -89,40 +163,53 @@ class _AprsMapContentState extends State<_AprsMapContent> {
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(20),
-      child: FlutterMap(
-        mapController: _mapController,
-        options: const MapOptions(
-          initialCenter: _initialCenter,
-          initialZoom: 12.0,
-          minZoom: 5,
-          maxZoom: 18,
-        ),
+      child: Stack(
         children: [
-          TileLayer(
-            urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-            userAgentPackageName: 'com.sarahrose.benshidash',
-            // For dark mode, we can apply a color filter to the map tiles
-            tileBuilder: theme.brightness == Brightness.dark
-                ? (context, tileWidget, tile) => ColorFiltered(
-                      colorFilter: const ColorFilter.matrix([
-                        // Invert brightness and apply a blueish tint
-                        -0.8, 0, 0, 0, 230,
-                        0, -0.8, 0, 0, 230,
-                        0, 0, -0.8, 0, 230,
-                        0, 0, 0, 1, 0,
-                      ]),
-                      child: tileWidget,
-                    )
-                : null,
+          FlutterMap(
+            mapController: _mapController,
+            options: MapOptions(
+              initialCenter: _currentCenter,
+              initialZoom: 12.0,
+              minZoom: 5,
+              maxZoom: 18,
+            ),
+            children: [
+              TileLayer(
+                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                userAgentPackageName: 'com.sarahrose.benshidash',
+                tileBuilder: theme.brightness == Brightness.dark
+                    ? (context, tileWidget, tile) => ColorFiltered(
+                          colorFilter: const ColorFilter.matrix([
+                            -0.8, 0, 0, 0, 230,
+                            0, -0.8, 0, 0, 230,
+                            0, 0, -0.8, 0, 230,
+                            0, 0, 0, 1, 0,
+                          ]),
+                          child: tileWidget,
+                        )
+                    : null,
+              ),
+              PolylineLayer(polylines: _pathPolylines),
+              MarkerLayer(markers: markers),
+            ],
           ),
-          MarkerLayer(markers: markers),
+          Positioned(
+            bottom: 16,
+            right: 16,
+            child: FloatingActionButton(
+              onPressed: () {
+                _mapController.move(_currentCenter, _mapController.camera.zoom);
+              },
+              backgroundColor: theme.colorScheme.surface.withOpacity(0.8),
+              child: Icon(Icons.my_location, color: theme.colorScheme.onSurface),
+            ),
+          ),
         ],
       ),
     );
   }
 }
 
-/// A widget to display a single station marker on the map.
 class _StationMarker extends StatelessWidget {
   final AprsPacket packet;
   const _StationMarker({required this.packet});
@@ -131,7 +218,7 @@ class _StationMarker extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Tooltip(
-      message: '${packet.source}\n${packet.comment ?? ''}',
+      message: '${packet.source}\n${packet.path.join(' -> ')}\n${packet.comment ?? ''}',
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [

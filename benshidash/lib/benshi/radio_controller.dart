@@ -35,6 +35,7 @@ class RadioController extends ChangeNotifier {
   int? batteryLevelAsPercentage;
 
   List<AprsPacket> aprsPackets = [];
+  AprsPacket? latestAprsPacket;
 
   bool get isReady => deviceInfo != null && status != null && settings != null && channelA != null && channelB != null;
   bool get isPowerOn => status?.isPowerOn ?? true;
@@ -143,25 +144,30 @@ class RadioController extends ChangeNotifier {
           _aprsReassemblyBuffer.clear();
 
           try {
+            // --- FIX: Removed ascii.decode from this debug line to prevent crashes ---
+            if (kDebugMode) {
+              print("PARSING APRS PACKET (bytes): $fullPacketBytes");
+            }
+
             final newPacket = AprsPacket.fromAX25Frame(fullPacketBytes);
 
-            // --- FIX: Added a null check before using the newPacket object ---
-            // This ensures we only proceed if parsing was successful.
             if (newPacket != null) {
+              latestAprsPacket = newPacket;
+
               if (newPacket.latitude != null && newPacket.longitude != null) {
                 final existingIndex = aprsPackets.indexWhere((p) => p.source == newPacket.source);
 
                 if (existingIndex != -1) {
-                  aprsPackets[existingIndex] = newPacket; // Update
+                  aprsPackets[existingIndex] = newPacket;
                 } else {
-                  aprsPackets.add(newPacket); // Add new
+                  aprsPackets.add(newPacket);
                 }
 
                 if (aprsPackets.length > 100) {
                   aprsPackets.removeAt(0);
                 }
-                dataChanged = true;
               }
+              dataChanged = true;
             }
           } catch (e) {
             if (kDebugMode) {

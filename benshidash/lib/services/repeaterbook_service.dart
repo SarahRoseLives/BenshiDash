@@ -1,5 +1,8 @@
 import 'dart:convert';
 import 'dart:math';
+import 'package:benshidash/services/location_service.dart';
+import 'package:benshidash/ui/screens/settings/settings.dart';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:geocoding/geocoding.dart';
 import '../models/repeater.dart';
@@ -12,13 +15,24 @@ class RepeaterBookService {
     required double latitude,
     required double longitude,
   }) async {
-    // Reverse geocode to get state and country
-    final placemarks = await placemarkFromCoordinates(latitude, longitude);
-    if (placemarks.isEmpty) throw Exception("Could not find placemark for location");
+    // --- MODIFIED: Bypass reverse geocoding when using the debug GPS source ---
+    String? state;
+    String? country;
 
-    final Placemark place = placemarks.first;
-    final String? state = place.administrativeArea;
-    final String? country = place.country;
+    if (kDebugMode && gpsSourceNotifier.value == GpsSource.debug) {
+      // For our debug location (Jefferson, OH), manually set the state and country.
+      state = 'Ohio';
+      country = 'United States';
+    } else {
+      // For all other modes, perform the live reverse geocoding lookup.
+      final placemarks = await placemarkFromCoordinates(latitude, longitude);
+      if (placemarks.isEmpty) throw Exception("Could not find placemark for location");
+      final Placemark place = placemarks.first;
+      state = place.administrativeArea;
+      country = place.country;
+    }
+    // --- END OF MODIFICATION ---
+
     if (state == null || country == null) throw Exception("Could not determine state/country from location");
 
     // Convert state name to FIPS code

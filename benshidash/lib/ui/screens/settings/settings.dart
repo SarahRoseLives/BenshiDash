@@ -1,32 +1,35 @@
 import 'dart:async';
+import 'package:benshidash/services/location_service.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bluetooth_serial/flutter_bluetooth_serial.dart';
 import '../../../benshi/radio_controller.dart';
 import '../../../main.dart';
 import '../home/dashboard.dart';
 import '../../widgets/main_layout.dart';
-import 'package:shared_preferences/shared_preferences.dart'; // Import shared_preferences
+import 'package:shared_preferences/shared_preferences.dart';
 
-// --- Theme Notifier ---
-/// A simple state manager for the app's theme.
 class ThemeNotifier extends ChangeNotifier {
-  // Default to dark mode as per the original UI design.
   ThemeMode _themeMode = ThemeMode.dark;
-
   ThemeMode get themeMode => _themeMode;
   bool get isDarkMode => _themeMode == ThemeMode.dark;
 
-  /// Sets the new theme and notifies any listening widgets to rebuild.
   void setTheme(ThemeMode themeMode) {
     if (_themeMode != themeMode) {
       _themeMode = themeMode;
-      notifyListeners(); // This is what triggers the UI update.
+      notifyListeners();
     }
   }
 }
 
-/// A global instance of the theme notifier, accessible throughout the app.
 final ThemeNotifier themeNotifier = ThemeNotifier();
+
+final ValueNotifier<bool> showAprsPathsNotifier = ValueNotifier(false);
+const String PREF_SHOW_APRS_PATHS = 'show_aprs_paths';
+
+// --- NEW: Notifier and Preference Key for GPS Source ---
+final ValueNotifier<GpsSource> gpsSourceNotifier = ValueNotifier(GpsSource.radio);
+const String PREF_GPS_SOURCE = 'gps_source';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -38,32 +41,45 @@ class SettingsScreen extends StatelessWidget {
     );
   }
 
-  // --- NEW: Method to handle disconnection ---
   Future<void> _disconnect(RadioController radioController) async {
-    // Dispose the controller to close the connection
     radioController.dispose();
     radioControllerNotifier.value = null;
-
-    // Remove the saved device address from preferences
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(PREF_LAST_DEVICE_ADDRESS);
-    print("Disconnected and cleared saved device.");
+  }
+
+  Future<void> _toggleAprsPaths(bool value) async {
+    showAprsPathsNotifier.value = value;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(PREF_SHOW_APRS_PATHS, value);
+  }
+
+  // --- NEW: Method to handle GPS source changes ---
+  Future<void> _onGpsSourceChanged(GpsSource? source) async {
+      if (source == null) return;
+      gpsSourceNotifier.value = source;
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt(PREF_GPS_SOURCE, source.index);
+
+      if (source == GpsSource.device) {
+        await locationService.start();
+      } else {
+        // Stop location service for both 'radio' and 'debug' sources
+        locationService.stop();
+      }
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    // Use an AnimatedBuilder to ensure the Switch updates when the theme changes.
     return AnimatedBuilder(
-      animation: themeNotifier,
+      animation: Listenable.merge([themeNotifier, showAprsPathsNotifier, gpsSourceNotifier]),
       builder: (context, child) {
         return ValueListenableBuilder<RadioController?>(
           valueListenable: radioControllerNotifier,
           builder: (context, radioController, _) {
             return MainLayout(
-              // --- THIS IS THE CHANGE ---
               radioController: radioController,
-              // --- END OF CHANGE ---
               radio: radio,
               battery: battery,
               gps: gps,
@@ -72,7 +88,6 @@ class SettingsScreen extends StatelessWidget {
                 children: [
                   _buildSectionTitle('Bluetooth Connection', theme),
                   Card(
-                    color: theme.cardTheme.color,
                     child: radioController == null
                         ? ListTile(
                             leading: const Icon(Icons.bluetooth_disabled),
@@ -86,29 +101,51 @@ class SettingsScreen extends StatelessWidget {
                             subtitle: Text(radioController.device.address),
                             trailing: TextButton(
                               child: const Text('Disconnect'),
-                              // --- MODIFIED: Call the new disconnect method ---
                               onPressed: () => _disconnect(radioController),
                             ),
                           ),
                   ),
-                  _buildSectionTitle('Appearance', theme),
+                  _buildSectionTitle('Application Settings', theme),
                   Card(
-                    color: theme.cardTheme.color,
-                    child: SwitchListTile(
-                      title: const Text('Enable Dark Mode'),
-                      subtitle: Text(
-                        'Switch between light and dark themes.',
-                        style: TextStyle(color: theme.textTheme.bodySmall?.color),
-                      ),
-                      value: themeNotifier.isDarkMode,
-                      onChanged: (isDark) {
-                        // Calling this method triggers the update across the app.
-                        themeNotifier.setTheme(isDark ? ThemeMode.dark : ThemeMode.light);
-                      },
-                      secondary: Icon(
-                        themeNotifier.isDarkMode ? Icons.nightlight_round : Icons.wb_sunny,
-                        color: theme.colorScheme.primary,
-                      ),
+                    child: Column(
+                      children: [
+                        ListTile(
+                          leading: Icon(Icons.gps_fixed, color: theme.colorScheme.primary),
+                          title: const Text('GPS Source'),
+                          trailing: DropdownButton<GpsSource>(
+                            value: gpsSourceNotifier.value,
+                            items: [
+                              const DropdownMenuItem(value: GpsSource.radio, child: Text("Radio GPS")),
+                              const DropdownMenuItem(value: GpsSource.device, child: Text("Device GPS")),
+                              // --- NEW: Conditionally add the debug option ---
+                              if (kDebugMode)
+                                const DropdownMenuItem(value: GpsSource.debug, child: Text("Debug GPS (Jefferson, OH)")),
+                            ],
+                            onChanged: _onGpsSourceChanged,
+                          ),
+                        ),
+                        const Divider(height: 1),
+                        SwitchListTile(
+                          title: const Text('Show APRS Packet Paths'),
+                          subtitle: const Text('Draw lines showing the path a packet took.'),
+                          value: showAprsPathsNotifier.value,
+                          onChanged: _toggleAprsPaths,
+                          secondary: Icon(Icons.polyline, color: theme.colorScheme.primary),
+                        ),
+                         const Divider(height: 1),
+                        SwitchListTile(
+                          title: const Text('Enable Dark Mode'),
+                          subtitle: const Text('Switch between light and dark themes.'),
+                          value: themeNotifier.isDarkMode,
+                          onChanged: (isDark) {
+                            themeNotifier.setTheme(isDark ? ThemeMode.dark : ThemeMode.light);
+                          },
+                          secondary: Icon(
+                            themeNotifier.isDarkMode ? Icons.nightlight_round : Icons.wb_sunny,
+                            color: theme.colorScheme.primary,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ],
@@ -131,6 +168,7 @@ class SettingsScreen extends StatelessWidget {
   }
 }
 
+// ... (No changes to _DeviceListDialog or its state)
 class _DeviceListDialog extends StatefulWidget {
   const _DeviceListDialog();
   @override
@@ -150,9 +188,7 @@ class _DeviceListDialogState extends State<_DeviceListDialog> {
   }
 
   void _startDiscovery() {
-    setState(() {
-      isDiscovering = true;
-    });
+    setState(() { isDiscovering = true; });
     _streamSubscription = FlutterBluetoothSerial.instance.startDiscovery().listen((r) {
       setState(() {
         final existingIndex = results.indexWhere((element) => element.device.address == r.device.address);
@@ -163,11 +199,8 @@ class _DeviceListDialogState extends State<_DeviceListDialog> {
         }
       });
     });
-
     _streamSubscription!.onDone(() {
-      setState(() {
-        isDiscovering = false;
-      });
+      setState(() { isDiscovering = false; });
     });
   }
 
@@ -201,26 +234,18 @@ class _DeviceListDialogState extends State<_DeviceListDialog> {
               subtitle: Text(result.device.address),
               onTap: isConnecting ? null : () async {
                 setState(() { isConnecting = true; });
-
                 final navigator = Navigator.of(context);
                 final messenger = ScaffoldMessenger.of(context);
-
                 try {
                   final controller = RadioController(device: result.device);
                   await controller.connect();
                   radioControllerNotifier.value = controller;
-
-                  // --- NEW: Save the device address on successful connection ---
                   final prefs = await SharedPreferences.getInstance();
                   await prefs.setString(PREF_LAST_DEVICE_ADDRESS, result.device.address);
-                  print("Saved device ${result.device.address} to preferences.");
-
                   navigator.pop();
-
                   messenger.showSnackBar(
                     const SnackBar(content: Text('Successfully connected!'), backgroundColor: Colors.green),
                   );
-
                 } catch (e) {
                   messenger.showSnackBar(
                     SnackBar(content: Text('Connection failed: $e'), backgroundColor: Colors.red),
