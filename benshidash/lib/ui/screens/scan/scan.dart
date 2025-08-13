@@ -4,7 +4,6 @@ import 'dart:async';
 import '../../../benshi/radio_controller.dart';
 import '../../../benshi/protocol/protocol.dart';
 import '../../../main.dart'; // To get the global notifier
-import '../home/dashboard.dart';
 import '../../widgets/main_layout.dart';
 
 class ScanScreen extends StatefulWidget {
@@ -30,10 +29,9 @@ class _ScanScreenState extends State<ScanScreen> {
       _radioController!.addListener(_onRadioUpdate);
       _loadAllChannels();
     } else {
-      // --- MODIFIED: Never display a message to connect radio, just load the screen ---
       setState(() {
         _isLoading = false;
-        _statusMessage = ''; // No message about connecting
+        _statusMessage = 'Connect to a radio to use the scanner.';
       });
     }
   }
@@ -54,11 +52,10 @@ class _ScanScreenState extends State<ScanScreen> {
       _radioController!.addListener(_onRadioUpdate);
       _loadAllChannels();
     } else {
-      // --- MODIFIED: Never display a message to connect radio, just load the screen ---
       setState(() {
         _isLoading = false;
         _channels = null; // Clear channels on disconnect
-        _statusMessage = ''; // No message about connecting
+        _statusMessage = 'Connect to a radio to use the scanner.';
       });
     }
   }
@@ -71,7 +68,10 @@ class _ScanScreenState extends State<ScanScreen> {
 
   Future<void> _loadAllChannels() async {
     if (!mounted || _radioController == null) {
-      // This case is handled by initState and _onControllerChange
+      setState(() {
+        _isLoading = false;
+        _statusMessage = 'Connect to a radio to load channels.';
+      });
       return;
     }
     setState(() {
@@ -157,18 +157,22 @@ class _ScanScreenState extends State<ScanScreen> {
     setState(() => _isLoading = true);
 
     try {
+      // Call the robust setRadioScan method. It handles the command, delay, and status update.
       await _radioController!.setRadioScan(!_radioController!.isScan);
     } catch (e) {
-      if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error toggling scan: $e")));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error toggling scan: $e")));
+      }
     } finally {
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    // --- MODIFIED: Check connection status once ---
     final bool isConnected = _radioController != null;
     final bool isScanning = isConnected && (_radioController?.isScan ?? false);
     final bool canInteract = isConnected && !_isLoading;
@@ -188,9 +192,6 @@ class _ScanScreenState extends State<ScanScreen> {
       builder: (context, radioController, _) {
         return MainLayout(
           radioController: radioController,
-          radio: radio,
-          battery: battery,
-          gps: gps,
           child: Column(
             children: [
               const SizedBox(height: 12),
@@ -270,10 +271,10 @@ class _ScanScreenState extends State<ScanScreen> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final double gridSpacing = 8;
-        final double availableHeight = constraints.maxHeight - (rowCount - 1) * gridSpacing;
-        final double cellHeight = availableHeight / rowCount;
+        final double availableHeight = constraints.maxHeight - (rowCount > 0 ? (rowCount - 1) * gridSpacing : 0);
+        final double cellHeight = rowCount > 0 ? availableHeight / rowCount : 0;
         final double cellWidth = (constraints.maxWidth - (crossAxisCount - 1) * gridSpacing) / crossAxisCount;
-        final double childAspectRatio = cellWidth / cellHeight;
+        final double childAspectRatio = cellHeight > 0 ? (cellWidth / cellHeight) : 1.0;
 
         return GridView.builder(
           padding: EdgeInsets.symmetric(horizontal: gridSpacing),
@@ -365,7 +366,6 @@ class _ScanScreenState extends State<ScanScreen> {
   }
 
   Widget _buildErrorView(String message) {
-    // --- MODIFIED: Never display a message to connect the radio, just load the screen ---
     final bool showRetry = _radioController != null && _channels == null && (message.isNotEmpty && !message.toLowerCase().contains('connect'));
     return Center(
       child: Column(

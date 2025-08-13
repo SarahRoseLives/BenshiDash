@@ -8,7 +8,6 @@ import 'package:latlong2/latlong.dart';
 import '../../../benshi/radio_controller.dart';
 import '../../../main.dart'; // To get the global notifier
 import '../../widgets/main_layout.dart';
-import '../home/dashboard.dart'; // For mock header/footer data
 import '../settings/settings.dart'; // Import settings to access the notifier
 
 class AprsScreen extends StatelessWidget {
@@ -21,9 +20,6 @@ class AprsScreen extends StatelessWidget {
       builder: (context, radioController, _) {
         return MainLayout(
           radioController: radioController,
-          radio: radio,
-          battery: battery,
-          gps: gps,
           child: radioController == null
               ? const Center(child: Text("Connect to a radio to view APRS data."))
               : const _AprsMapContent(),

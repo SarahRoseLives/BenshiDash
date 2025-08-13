@@ -1,11 +1,8 @@
-// lib/ui/screens/scan/vfo_scan_screen.dart
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../../benshi/radio_controller.dart';
 import '../../../main.dart';
 import '../../widgets/main_layout.dart';
-import '../home/dashboard.dart';
 
 class VfoScanScreen extends StatelessWidget {
   const VfoScanScreen({super.key});
@@ -17,9 +14,6 @@ class VfoScanScreen extends StatelessWidget {
       builder: (context, radioController, _) {
         return MainLayout(
           radioController: radioController,
-          radio: radio,
-          battery: battery,
-          gps: gps,
           child: radioController == null
               ? const Center(child: Text("Connect to a radio to use VFO Scan."))
               : const _VfoScanContent(),
@@ -42,7 +36,6 @@ class _VfoScanContentState extends State<_VfoScanContent> {
 
   final _startFreqController = TextEditingController(text: '144.000');
   final _endFreqController = TextEditingController(text: '148.000');
-  // --- MODIFIED: Changed from int to num to support 12.5 ---
   num _stepKhz = 25;
 
   TextEditingController? _activeController;
@@ -201,7 +194,6 @@ class _VfoScanContentState extends State<_VfoScanContent> {
   }
 
   Widget _buildStepSelector(ThemeData theme) {
-    // --- MODIFIED: Added 12.5 to the list ---
     final steps = [5, 10, 12.5, 25, 50, 100];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -215,7 +207,6 @@ class _VfoScanContentState extends State<_VfoScanContent> {
             bool isSelected = _stepKhz == step;
             return ChoiceChip(
               label: Text('$step kHz'),
-              // --- MODIFIED: Made buttons larger ---
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               labelStyle: TextStyle(
                 fontSize: 16,

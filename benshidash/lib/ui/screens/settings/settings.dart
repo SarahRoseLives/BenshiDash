@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bluetooth_serial/flutter_bluetooth_serial.dart';
 import '../../../benshi/radio_controller.dart';
 import '../../../main.dart';
-import '../home/dashboard.dart';
 import '../../widgets/main_layout.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -27,13 +26,20 @@ final ThemeNotifier themeNotifier = ThemeNotifier();
 final ValueNotifier<bool> showAprsPathsNotifier = ValueNotifier(false);
 const String PREF_SHOW_APRS_PATHS = 'show_aprs_paths';
 
-// --- NEW: Notifier and Preference Key for GPS Source ---
 final ValueNotifier<GpsSource> gpsSourceNotifier = ValueNotifier(GpsSource.radio);
 const String PREF_GPS_SOURCE = 'gps_source';
 
-class SettingsScreen extends StatelessWidget {
+final ValueNotifier<double> aprsNearbyRadiusNotifier = ValueNotifier(50.0);
+const String PREF_APRS_RADIUS = 'aprs_nearby_radius';
+
+class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
 
+  @override
+  State<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _showDeviceSelectionDialog(BuildContext context) async {
     showDialog(
       context: context,
@@ -54,35 +60,36 @@ class SettingsScreen extends StatelessWidget {
     await prefs.setBool(PREF_SHOW_APRS_PATHS, value);
   }
 
-  // --- NEW: Method to handle GPS source changes ---
   Future<void> _onGpsSourceChanged(GpsSource? source) async {
-      if (source == null) return;
-      gpsSourceNotifier.value = source;
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setInt(PREF_GPS_SOURCE, source.index);
+    if (source == null) return;
+    gpsSourceNotifier.value = source;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(PREF_GPS_SOURCE, source.index);
 
-      if (source == GpsSource.device) {
-        await locationService.start();
-      } else {
-        // Stop location service for both 'radio' and 'debug' sources
-        locationService.stop();
-      }
+    if (source == GpsSource.device) {
+      await locationService.start();
+    } else {
+      locationService.stop();
+    }
+  }
+
+  Future<void> _onAprsRadiusChanged(double value) async {
+    aprsNearbyRadiusNotifier.value = value;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(PREF_APRS_RADIUS, value);
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return AnimatedBuilder(
-      animation: Listenable.merge([themeNotifier, showAprsPathsNotifier, gpsSourceNotifier]),
+      animation: Listenable.merge([themeNotifier, showAprsPathsNotifier, gpsSourceNotifier, aprsNearbyRadiusNotifier]),
       builder: (context, child) {
         return ValueListenableBuilder<RadioController?>(
           valueListenable: radioControllerNotifier,
           builder: (context, radioController, _) {
             return MainLayout(
               radioController: radioController,
-              radio: radio,
-              battery: battery,
-              gps: gps,
               child: ListView(
                 padding: const EdgeInsets.all(24.0),
                 children: [
@@ -117,7 +124,6 @@ class SettingsScreen extends StatelessWidget {
                             items: [
                               const DropdownMenuItem(value: GpsSource.radio, child: Text("Radio GPS")),
                               const DropdownMenuItem(value: GpsSource.device, child: Text("Device GPS")),
-                              // --- NEW: Conditionally add the debug option ---
                               if (kDebugMode)
                                 const DropdownMenuItem(value: GpsSource.debug, child: Text("Debug GPS (Jefferson, OH)")),
                             ],
@@ -132,7 +138,18 @@ class SettingsScreen extends StatelessWidget {
                           onChanged: _toggleAprsPaths,
                           secondary: Icon(Icons.polyline, color: theme.colorScheme.primary),
                         ),
-                         const Divider(height: 1),
+                        const Divider(height: 1),
+                        _buildSliderSetting(
+                            title: 'APRS "Nearby" Radius',
+                            subtitle: 'Current: ${aprsNearbyRadiusNotifier.value.round()} miles',
+                            value: aprsNearbyRadiusNotifier.value,
+                            min: 5,
+                            max: 200,
+                            divisions: 39, // (200-5)/5
+                            onChanged: (val) => setState(() => aprsNearbyRadiusNotifier.value = val),
+                            onChangeEnd: _onAprsRadiusChanged,
+                        ),
+                        const Divider(height: 1),
                         SwitchListTile(
                           title: const Text('Enable Dark Mode'),
                           subtitle: const Text('Switch between light and dark themes.'),
@@ -162,13 +179,43 @@ class SettingsScreen extends StatelessWidget {
       padding: const EdgeInsets.only(top: 24.0, bottom: 8.0, left: 4.0),
       child: Text(
         title,
-        style: theme.textTheme.titleLarge?.copyWith(color: theme.colorScheme.primary),
+        style:
+            theme.textTheme.titleLarge?.copyWith(color: theme.colorScheme.primary),
+      ),
+    );
+  }
+
+  Widget _buildSliderSetting({
+    required String title,
+    required String subtitle,
+    required double value,
+    required double min,
+    required double max,
+    required int divisions,
+    required ValueChanged<double> onChanged,
+    required ValueChanged<double> onChangeEnd,
+  }) {
+    return ListTile(
+      title: Text(title),
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(subtitle, style: Theme.of(context).textTheme.bodySmall),
+          Slider(
+            value: value,
+            min: min,
+            max: max,
+            divisions: divisions,
+            label: value.round().toString(),
+            onChanged: onChanged,
+            onChangeEnd: onChangeEnd,
+          ),
+        ],
       ),
     );
   }
 }
 
-// ... (No changes to _DeviceListDialog or its state)
 class _DeviceListDialog extends StatefulWidget {
   const _DeviceListDialog();
   @override

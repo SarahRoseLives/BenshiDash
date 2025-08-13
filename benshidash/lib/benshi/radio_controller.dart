@@ -1,5 +1,3 @@
-// benshi/radio_controller.dart
-
 import 'dart:async';
 import 'dart:typed_data';
 import '../models/aprs_packet.dart';
@@ -16,7 +14,8 @@ class RadioController extends ChangeNotifier {
 
   AudioController? _audioController;
 
-  final StreamController<Message> _messageStreamController = StreamController<Message>.broadcast();
+  final StreamController<Message> _messageStreamController = StreamController<
+      Message>.broadcast();
   StreamSubscription? _btStreamSubscription;
   Uint8List _rxBuffer = Uint8List(0);
 
@@ -37,17 +36,30 @@ class RadioController extends ChangeNotifier {
   List<AprsPacket> aprsPackets = [];
   AprsPacket? latestAprsPacket;
 
-  bool get isReady => deviceInfo != null && status != null && settings != null && channelA != null && channelB != null;
+  bool get isReady =>
+      deviceInfo != null && status != null && settings != null &&
+          channelA != null && channelB != null;
+
   bool get isPowerOn => status?.isPowerOn ?? true;
+
   bool get isInTx => status?.isInTx ?? false;
+
   bool get isInRx => status?.isInRx ?? false;
+
   double get rssi => status?.rssi ?? 0.0;
+
   bool get isSq => status?.isSq ?? false;
+
   bool get isScan => status?.isScan ?? false;
+
   int get currentChannelId => status?.currentChannelId ?? 0;
+
   String get currentChannelName => currentChannel?.name ?? 'Loading...';
+
   double get currentRxFreq => currentChannel?.rxFreq ?? 0.0;
+
   bool get isGpsLocked => status?.isGpsLocked ?? false;
+
   bool get supportsVfo => deviceInfo?.supportsVfo ?? false;
 
   bool isAudioMonitoring = false;
@@ -67,7 +79,8 @@ class RadioController extends ChangeNotifier {
 
     _initializeRadioState();
 
-    _audioController = AudioController(deviceAddress: device.address, rfcommChannel: 4);
+    _audioController =
+        AudioController(deviceAddress: device.address, rfcommChannel: 4);
     notifyListeners();
   }
 
@@ -84,12 +97,12 @@ class RadioController extends ChangeNotifier {
       try {
         final message = Message.fromBytes(result.frame.messageBytes);
 
-        if (message.command == BasicCommand.EVENT_NOTIFICATION && message.body is EventNotificationBody) {
+        if (message.command == BasicCommand.EVENT_NOTIFICATION &&
+            message.body is EventNotificationBody) {
           _handleEvent(message.body as EventNotificationBody);
         } else {
           _messageStreamController.add(message);
         }
-
       } catch (e, s) {
         if (kDebugMode) {
           print('Error parsing message: $e');
@@ -120,17 +133,17 @@ class RadioController extends ChangeNotifier {
       case EventType.HT_CH_CHANGED:
         final channelReply = eventBody.event as ReadRFChReplyBody;
         if (channelReply.rfCh != null) {
-            final updatedChannel = channelReply.rfCh!;
-            if (status?.currentChannelId == updatedChannel.channelId) {
-                currentChannel = updatedChannel;
-            }
-            if (updatedChannel.channelId == settings?.channelA) {
-              channelA = updatedChannel;
-            }
-            if (updatedChannel.channelId == settings?.channelB) {
-              channelB = updatedChannel;
-            }
-            dataChanged = true;
+          final updatedChannel = channelReply.rfCh!;
+          if (status?.currentChannelId == updatedChannel.channelId) {
+            currentChannel = updatedChannel;
+          }
+          if (updatedChannel.channelId == settings?.channelA) {
+            channelA = updatedChannel;
+          }
+          if (updatedChannel.channelId == settings?.channelB) {
+            channelB = updatedChannel;
+          }
+          dataChanged = true;
         }
         break;
       case EventType.DATA_RXD:
@@ -155,7 +168,8 @@ class RadioController extends ChangeNotifier {
               latestAprsPacket = newPacket;
 
               if (newPacket.latitude != null && newPacket.longitude != null) {
-                final existingIndex = aprsPackets.indexWhere((p) => p.source == newPacket.source);
+                final existingIndex = aprsPackets.indexWhere((p) =>
+                p.source == newPacket.source);
 
                 if (existingIndex != -1) {
                   aprsPackets[existingIndex] = newPacket;
@@ -211,7 +225,6 @@ class RadioController extends ChangeNotifier {
       if (settings != null) {
         await _updateVfoChannels();
       }
-
     } catch (e) {
       if (kDebugMode) print('Error initializing radio state: $e');
     } finally {
@@ -291,7 +304,8 @@ class RadioController extends ChangeNotifier {
 
         if (!completer.isCompleted) {
           if (body.replyStatus != ReplyStatus.SUCCESS) {
-            completer.completeError(Exception("Command failed with status: ${body.replyStatus}"));
+            completer.completeError(
+                Exception("Command failed with status: ${body.replyStatus}"));
           } else {
             completer.complete(body);
           }
@@ -304,7 +318,8 @@ class RadioController extends ChangeNotifier {
 
     Future.delayed(timeout, () {
       if (!completer.isCompleted) {
-        completer.completeError(TimeoutException('Radio did not reply in time for ${command.command}.'));
+        completer.completeError(TimeoutException(
+            'Radio did not reply in time for ${command.command}.'));
         streamSub.cancel();
       }
     });
@@ -322,10 +337,10 @@ class RadioController extends ChangeNotifier {
     ];
     for (var eventType in eventsToRegister) {
       final command = Message(
-        commandGroup: CommandGroup.BASIC,
-        command: BasicCommand.REGISTER_NOTIFICATION,
-        isReply: false,
-        body: RegisterNotificationBody(eventType: eventType)
+          commandGroup: CommandGroup.BASIC,
+          command: BasicCommand.REGISTER_NOTIFICATION,
+          isReply: false,
+          body: RegisterNotificationBody(eventType: eventType)
       );
       await _sendCommand(command);
       await Future.delayed(const Duration(milliseconds: 50));
@@ -338,7 +353,8 @@ class RadioController extends ChangeNotifier {
     try {
       vfoChannel = await getChannel(vfoScanChannelId);
     } catch (e) {
-      if (kDebugMode) print("Could not read VFO channel $vfoScanChannelId to update it: $e");
+      if (kDebugMode) print(
+          "Could not read VFO channel $vfoScanChannelId to update it: $e");
       return;
     }
 
@@ -353,7 +369,8 @@ class RadioController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> startVfoScan({required double startFreqMhz, required double endFreqMhz, required num stepKhz}) async {
+  Future<void> startVfoScan(
+      {required double startFreqMhz, required double endFreqMhz, required num stepKhz}) async {
     if (isVfoScanning) return;
     const vfoScanChannelId = 252;
 
@@ -373,18 +390,19 @@ class RadioController extends ChangeNotifier {
     await setVfoFrequency(currentVfoFrequencyMhz);
 
     _vfoScanTimer?.cancel();
-    _vfoScanTimer = Timer.periodic(const Duration(milliseconds: 250), (timer) async {
-      if (!isVfoScanning || (status?.isSq ?? false)) {
-        return;
-      }
+    _vfoScanTimer =
+        Timer.periodic(const Duration(milliseconds: 250), (timer) async {
+          if (!isVfoScanning || (status?.isSq ?? false)) {
+            return;
+          }
 
-      currentVfoFrequencyMhz += (_vfoScanStepKhz / 1000.0);
-      if (currentVfoFrequencyMhz > _vfoScanEndFreq) {
-        currentVfoFrequencyMhz = _vfoScanStartFreq;
-      }
+          currentVfoFrequencyMhz += (_vfoScanStepKhz / 1000.0);
+          if (currentVfoFrequencyMhz > _vfoScanEndFreq) {
+            currentVfoFrequencyMhz = _vfoScanStartFreq;
+          }
 
-      await setVfoFrequency(currentVfoFrequencyMhz);
-    });
+          await setVfoFrequency(currentVfoFrequencyMhz);
+        });
 
     notifyListeners();
   }
@@ -397,19 +415,19 @@ class RadioController extends ChangeNotifier {
   }
 
   Future<void> writeChannel(Channel channel) async {
-      final reply = await _sendCommandExpectReply<WriteRFChReplyBody>(
-          command: Message(
-              commandGroup: CommandGroup.BASIC,
-              command: BasicCommand.WRITE_RF_CH,
-              isReply: false,
-              body: WriteRFChBody(rfCh: channel)
-          ),
-          replyCommand: BasicCommand.WRITE_RF_CH,
-          timeout: const Duration(seconds: 3),
-      );
-      if (kDebugMode) {
-        print('Successfully wrote channel ${reply.channelId}');
-      }
+    final reply = await _sendCommandExpectReply<WriteRFChReplyBody>(
+      command: Message(
+          commandGroup: CommandGroup.BASIC,
+          command: BasicCommand.WRITE_RF_CH,
+          isReply: false,
+          body: WriteRFChBody(rfCh: channel)
+      ),
+      replyCommand: BasicCommand.WRITE_RF_CH,
+      timeout: const Duration(seconds: 3),
+    );
+    if (kDebugMode) {
+      print('Successfully wrote channel ${reply.channelId}');
+    }
   }
 
   Future<void> writeSettings(Settings newSettings) async {
@@ -425,19 +443,25 @@ class RadioController extends ChangeNotifier {
 
     if (reply.replyStatus == ReplyStatus.SUCCESS) {
       if (kDebugMode) print("Successfully sent WRITE_SETTINGS.");
+      // Update local state and notify listeners.
+      // The caller is responsible for polling getStatus() if it needs to confirm a state change.
       settings = newSettings;
       await _updateVfoChannels();
-      await getStatus();
       notifyListeners();
     } else {
-      throw Exception("Failed to set scan mode via WRITE_SETTINGS.");
+      throw Exception(
+          "Failed to write settings. Radio replied with status: ${reply
+              .replyStatus}");
     }
   }
 
 
   Future<DeviceInfo?> getDeviceInfo() async {
     final reply = await _sendCommandExpectReply<GetDevInfoReplyBody>(
-      command: Message(commandGroup: CommandGroup.BASIC, command: BasicCommand.GET_DEV_INFO, isReply: false, body: GetDevInfoBody()),
+      command: Message(commandGroup: CommandGroup.BASIC,
+          command: BasicCommand.GET_DEV_INFO,
+          isReply: false,
+          body: GetDevInfoBody()),
       replyCommand: BasicCommand.GET_DEV_INFO,
     );
     deviceInfo = reply.devInfo;
@@ -447,7 +471,10 @@ class RadioController extends ChangeNotifier {
 
   Future<Settings?> getSettings() async {
     final reply = await _sendCommandExpectReply<ReadSettingsReplyBody>(
-      command: Message(commandGroup: CommandGroup.BASIC, command: BasicCommand.READ_SETTINGS, isReply: false, body: ReadSettingsBody()),
+      command: Message(commandGroup: CommandGroup.BASIC,
+          command: BasicCommand.READ_SETTINGS,
+          isReply: false,
+          body: ReadSettingsBody()),
       replyCommand: BasicCommand.READ_SETTINGS,
     );
     settings = reply.settings;
@@ -457,7 +484,10 @@ class RadioController extends ChangeNotifier {
 
   Future<StatusExt?> getStatus() async {
     final reply = await _sendCommandExpectReply<GetHtStatusReplyBody>(
-      command: Message(commandGroup: CommandGroup.BASIC, command: BasicCommand.GET_HT_STATUS, isReply: false, body: GetHtStatusBody()),
+      command: Message(commandGroup: CommandGroup.BASIC,
+          command: BasicCommand.GET_HT_STATUS,
+          isReply: false,
+          body: GetHtStatusBody()),
       replyCommand: BasicCommand.GET_HT_STATUS,
     );
     status = reply.status;
@@ -467,7 +497,11 @@ class RadioController extends ChangeNotifier {
 
   Future<num?> getBatteryVoltage() async {
     final reply = await _sendCommandExpectReply<ReadPowerStatusReplyBody>(
-      command: Message(commandGroup: CommandGroup.BASIC, command: BasicCommand.READ_STATUS, isReply: false, body: ReadPowerStatusBody(statusType: PowerStatusType.BATTERY_VOLTAGE)),
+      command: Message(commandGroup: CommandGroup.BASIC,
+          command: BasicCommand.READ_STATUS,
+          isReply: false,
+          body: ReadPowerStatusBody(
+              statusType: PowerStatusType.BATTERY_VOLTAGE)),
       replyCommand: BasicCommand.READ_STATUS,
     );
     batteryVoltage = reply.value?.toDouble();
@@ -477,7 +511,11 @@ class RadioController extends ChangeNotifier {
 
   Future<num?> getBatteryPercentage() async {
     final reply = await _sendCommandExpectReply<ReadPowerStatusReplyBody>(
-      command: Message(commandGroup: CommandGroup.BASIC, command: BasicCommand.READ_STATUS, isReply: false, body: ReadPowerStatusBody(statusType: PowerStatusType.BATTERY_LEVEL_AS_PERCENTAGE)),
+      command: Message(commandGroup: CommandGroup.BASIC,
+          command: BasicCommand.READ_STATUS,
+          isReply: false,
+          body: ReadPowerStatusBody(
+              statusType: PowerStatusType.BATTERY_LEVEL_AS_PERCENTAGE)),
       replyCommand: BasicCommand.READ_STATUS,
     );
     batteryLevelAsPercentage = reply.value?.toInt();
@@ -488,13 +526,16 @@ class RadioController extends ChangeNotifier {
   Future<Position?> getPosition() async {
     try {
       final reply = await _sendCommandExpectReply<GetPositionReplyBody>(
-        command: Message(commandGroup: CommandGroup.BASIC, command: BasicCommand.GET_POSITION, isReply: false, body: GetPositionBody()),
+        command: Message(commandGroup: CommandGroup.BASIC,
+            command: BasicCommand.GET_POSITION,
+            isReply: false,
+            body: GetPositionBody()),
         replyCommand: BasicCommand.GET_POSITION,
       );
       gps = reply.position;
       notifyListeners();
       return reply.position;
-    } catch(e) {
+    } catch (e) {
       if (kDebugMode) print("Could not get position: $e");
       return null;
     }
@@ -502,11 +543,15 @@ class RadioController extends ChangeNotifier {
 
   Future<Channel> getChannel(int channelId) async {
     final reply = await _sendCommandExpectReply<ReadRFChReplyBody>(
-      command: Message(commandGroup: CommandGroup.BASIC, command: BasicCommand.READ_RF_CH, isReply: false, body: ReadRFChBody(channelId: channelId)),
+      command: Message(commandGroup: CommandGroup.BASIC,
+          command: BasicCommand.READ_RF_CH,
+          isReply: false,
+          body: ReadRFChBody(channelId: channelId)),
       replyCommand: BasicCommand.READ_RF_CH,
       validator: (body) => body.rfCh?.channelId == channelId,
     );
-    if (reply.rfCh == null) throw Exception('Failed to get channel $channelId.');
+    if (reply.rfCh == null) throw Exception(
+        'Failed to get channel $channelId.');
     if (status?.currentChannelId == channelId) {
       currentChannel = reply.rfCh;
       notifyListeners();
@@ -533,10 +578,20 @@ class RadioController extends ChangeNotifier {
 
   Future<void> setRadioScan(bool enable) async {
     if (settings == null) await getSettings();
-    if (settings == null) throw Exception("Could not load radio settings to modify them.");
+    if (settings == null) throw Exception(
+        "Could not load radio settings to modify them.");
 
     final newSettings = settings!.copyWith(scan: enable);
+
+    // 1. Write the new settings object to the radio.
     await writeSettings(newSettings);
+
+    // 2. Wait for a moment to allow the radio to process the command and update its internal state.
+    await Future.delayed(const Duration(milliseconds: 250));
+
+    // 3. Poll the radio's status again to get the definitive, updated state.
+    // This will update the `isScan` property and notify all listeners, including the ScanScreen UI.
+    await getStatus();
   }
 
   Future<void> startAudioMonitor() async {

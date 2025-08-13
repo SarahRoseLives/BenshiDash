@@ -1,4 +1,3 @@
-// main.dart
 import 'package:benshidash/services/location_service.dart';
 import 'package:flutter/material.dart';
 import 'benshi/radio_controller.dart';
@@ -17,13 +16,15 @@ Future<void> main() async {
   await _loadSettings(prefs);
   await _tryAutoConnect(prefs);
 
-  runApp(const CarHeadUnitApp());
+  runApp(const TabletGatekeeper());
 }
 
 Future<void> _loadSettings(SharedPreferences prefs) async {
   showAprsPathsNotifier.value = prefs.getBool(PREF_SHOW_APRS_PATHS) ?? false;
   final savedSource = GpsSource.values[prefs.getInt(PREF_GPS_SOURCE) ?? GpsSource.radio.index];
   gpsSourceNotifier.value = savedSource;
+  // --- NEW: Load the APRS radius setting ---
+  aprsNearbyRadiusNotifier.value = prefs.getDouble(PREF_APRS_RADIUS) ?? 50.0;
 
   // Start the location service if the saved preference is 'device'
   if (savedSource == GpsSource.device) {
@@ -98,6 +99,39 @@ class AppThemes {
     iconTheme: IconThemeData(color: Colors.grey.shade800),
     dividerColor: Colors.black26,
   );
+}
+
+class TabletGatekeeper extends StatelessWidget {
+  const TabletGatekeeper({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Car Head Unit',
+      debugShowCheckedModeBanner: false,
+      theme: AppThemes.lightTheme,
+      darkTheme: AppThemes.darkTheme,
+      home: Builder(
+        builder: (context) {
+          final shortestSide = MediaQuery.of(context).size.shortestSide;
+          if (shortestSide < 600) {
+            // Not a tablet: block app usage
+            return const Scaffold(
+              body: Center(
+                child: Text(
+                  'This app is only available on tablets.',
+                  style: TextStyle(fontSize: 24),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            );
+          }
+          // Tablet: run the actual app
+          return const CarHeadUnitApp();
+        },
+      ),
+    );
+  }
 }
 
 class CarHeadUnitApp extends StatelessWidget {

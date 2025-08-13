@@ -1,6 +1,5 @@
 import 'dart:math';
 import 'package:benshidash/benshi/radio_controller.dart';
-import 'package:benshidash/main.dart';
 import 'package:flutter/material.dart';
 
 // Import all the destination screens
@@ -38,20 +37,25 @@ class LayoutData extends InheritedWidget {
   }
 }
 
+/// A top-level navigation helper function.
+void _navigateTo(BuildContext context, Widget screen) {
+  Navigator.of(context).pushReplacement(
+    PageRouteBuilder(
+      pageBuilder: (context, animation1, animation2) => screen,
+      transitionDuration: Duration.zero,
+      reverseTransitionDuration: Duration.zero,
+    ),
+  );
+}
+
 // The main layout shell widget.
 class MainLayout extends StatelessWidget {
   final Widget child;
-  final Map radio;
-  final Map battery;
-  final Map gps;
   final RadioController? radioController;
 
   const MainLayout({
     super.key,
     required this.child,
-    required this.radio,
-    required this.battery,
-    required this.gps,
     this.radioController,
   });
 
@@ -59,7 +63,6 @@ class MainLayout extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    // This Scaffold is the key to fixing the context errors.
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
       body: LayoutBuilder(
@@ -90,16 +93,14 @@ class MainLayout extends StatelessWidget {
                         height: 60 * scale,
                         child: _TopStatusRow(
                           fontScale: scale,
-                          radio: radio,
-                          battery: battery,
-                          gps: gps,
+                          radioController: radioController,
                         ),
                       ),
                       SizedBox(height: 10 * scale),
                       Expanded(
                         child: isPortrait
-                            ? _MobileLayout(child: child, radioController: radioController)
-                            : _DesktopLayout(child: child, radioController: radioController),
+                            ? _MobileLayout(child: child)
+                            : _DesktopLayout(child: child),
                       ),
                       SizedBox(height: 10 * scale),
                       SizedBox(
@@ -107,15 +108,13 @@ class MainLayout extends StatelessWidget {
                         child: _BottomStatusBar(
                           fontScale: scale,
                           compact: compact,
-                          gps: gps,
-                          radio: radio,
-                          battery: battery,
+                          radioController: radioController,
                         ),
                       ),
                     ],
                   ),
                 ),
-              );
+            	);
             }),
           );
         },
@@ -124,20 +123,9 @@ class MainLayout extends StatelessWidget {
   }
 }
 
-void _navigateTo(BuildContext context, Widget screen) {
-  Navigator.of(context).pushReplacement(
-    PageRouteBuilder(
-      pageBuilder: (context, animation1, animation2) => screen,
-      transitionDuration: Duration.zero,
-      reverseTransitionDuration: Duration.zero,
-    ),
-  );
-}
-
 class _DesktopLayout extends StatelessWidget {
   final Widget child;
-  final RadioController? radioController;
-  const _DesktopLayout({required this.child, this.radioController});
+  const _DesktopLayout({required this.child});
 
   @override
   Widget build(BuildContext context) {
@@ -151,13 +139,10 @@ class _DesktopLayout extends StatelessWidget {
               label: "Radio Setup",
               onTap: () => _navigateTo(context, const RadioSettingsScreen()),
             ),
-            // --- MODIFIED: Scan menu always navigates, no radio check or connect message ---
             _SidebarItem(
               icon: Icons.settings_input_antenna,
               label: "Scan",
-              onTap: () {
-                _navigateTo(context, const ScanScreen());
-              },
+              onTap: () => _navigateTo(context, const ScanScreen()),
             ),
             _SidebarItem(
               icon: Icons.settings,
@@ -199,8 +184,7 @@ class _DesktopLayout extends StatelessWidget {
 
 class _MobileLayout extends StatelessWidget {
   final Widget child;
-  final RadioController? radioController;
-  const _MobileLayout({required this.child, this.radioController});
+  const _MobileLayout({required this.child});
 
   @override
   Widget build(BuildContext context) {
@@ -213,13 +197,10 @@ class _MobileLayout extends StatelessWidget {
               label: "",
               onTap: () => _navigateTo(context, const RadioSettingsScreen()),
             ),
-            // --- MODIFIED: Scan menu always navigates, no radio check or connect message ---
             _SidebarItem(
               icon: Icons.settings_input_antenna,
               label: "",
-              onTap: () {
-                _navigateTo(context, const ScanScreen());
-              },
+              onTap: () => _navigateTo(context, const ScanScreen()),
             ),
             _SidebarItem(
               icon: Icons.settings,
@@ -319,13 +300,8 @@ class _Sidebar extends StatelessWidget {
 
 class _TopStatusRow extends StatelessWidget {
   final double fontScale;
-  final Map radio, battery, gps;
-  const _TopStatusRow({
-    required this.fontScale,
-    required this.radio,
-    required this.battery,
-    required this.gps,
-  });
+  final RadioController? radioController;
+  const _TopStatusRow({required this.fontScale, this.radioController});
   @override
   Widget build(BuildContext context) {
     return Row(
@@ -338,49 +314,47 @@ class _TopStatusRow extends StatelessWidget {
             borderRadius: BorderRadius.circular(8),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
-              child: _RadioStatus(radio: radio, fontScale: fontScale),
+              child: _RadioStatus(radioController: radioController, fontScale: fontScale),
             ),
           ),
         ),
-        _BatteryStatus(battery: battery, fontScale: fontScale),
-        _GPSStatus(gps: gps, fontScale: fontScale),
+        _BatteryStatus(radioController: radioController, fontScale: fontScale),
+        _GPSStatus(radioController: radioController, fontScale: fontScale),
       ],
     );
   }
 }
 
 class _RadioStatus extends StatelessWidget {
-  final Map radio;
+  final RadioController? radioController;
   final double fontScale;
-  const _RadioStatus({required this.radio, required this.fontScale});
+  const _RadioStatus({required this.radioController, required this.fontScale});
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final inactiveColor = theme.iconTheme.color?.withOpacity(0.3);
+    final bool isConnected = radioController != null;
 
     return Row(
       children: [
         Icon(Icons.radio, color: theme.colorScheme.primary, size: 28 * fontScale),
         SizedBox(width: 6 * fontScale),
-        Text("${radio['id']} ${radio['model']}",
+        Text(
+          isConnected
+            ? "${radioController?.deviceInfo?.vendorName ?? ''} ${radioController?.deviceInfo?.productName ?? ''}"
+            : "No Radio",
             style: TextStyle(
                 color: theme.colorScheme.onBackground,
                 fontWeight: FontWeight.w600,
                 fontSize: 15 * fontScale)),
         SizedBox(width: 8 * fontScale),
         Icon(
-            radio['connected'] == true
-                ? Icons.bluetooth_connected
-                : Icons.bluetooth_disabled,
-            color: radio['connected'] == true ? theme.colorScheme.primary : inactiveColor,
+            isConnected ? Icons.bluetooth_connected : Icons.bluetooth_disabled,
+            color: isConnected ? theme.colorScheme.primary : inactiveColor,
             size: 18 * fontScale),
         SizedBox(width: 2 * fontScale),
         Icon(Icons.headset,
-            color: radio['audio'] == true ? theme.colorScheme.primary : inactiveColor,
-            size: 18 * fontScale),
-        SizedBox(width: 2 * fontScale),
-        Icon(Icons.settings_input_antenna,
-            color: radio['bt'] == true ? theme.colorScheme.primary : inactiveColor,
+            color: radioController?.isAudioMonitoring ?? false ? theme.colorScheme.primary : inactiveColor,
             size: 18 * fontScale),
       ],
     );
@@ -388,26 +362,27 @@ class _RadioStatus extends StatelessWidget {
 }
 
 class _BatteryStatus extends StatelessWidget {
-  final Map battery;
+  final RadioController? radioController;
   final double fontScale;
-  const _BatteryStatus({required this.battery, required this.fontScale});
+  const _BatteryStatus({required this.radioController, required this.fontScale});
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final percent = radioController?.batteryLevelAsPercentage ?? 0;
+    final voltage = radioController?.batteryVoltage ?? 0.0;
+
     return Row(
       children: [
         Icon(
-          battery['charging'] == true
-              ? Icons.battery_charging_full
-              : Icons.battery_full,
-          color: battery['percent'] > 20
+          Icons.battery_full,
+          color: percent > 20
               ? (theme.brightness == Brightness.dark ? Colors.greenAccent : Colors.green)
               : theme.colorScheme.error,
           size: 22 * fontScale,
         ),
         SizedBox(width: 4 * fontScale),
         Text(
-          "${battery['percent']}% (${battery['voltage']}V)",
+          radioController != null ? "$percent% (${voltage.toStringAsFixed(1)}V)" : "---",
           style: TextStyle(
               color: theme.colorScheme.onBackground, fontSize: 14 * fontScale),
         ),
@@ -417,26 +392,27 @@ class _BatteryStatus extends StatelessWidget {
 }
 
 class _GPSStatus extends StatelessWidget {
-  final Map gps;
+  final RadioController? radioController;
   final double fontScale;
-  const _GPSStatus({required this.gps, required this.fontScale});
+  const _GPSStatus({required this.radioController, required this.fontScale});
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final lockedColor =
-        theme.brightness == Brightness.dark ? Colors.lightGreenAccent : Colors.green.shade700;
+    final bool isLocked = radioController?.isGpsLocked ?? false;
+    final lat = radioController?.gps?.latitude ?? 0;
+    final lon = radioController?.gps?.longitude ?? 0;
+
+    final lockedColor = theme.brightness == Brightness.dark ? Colors.lightGreenAccent : Colors.green.shade700;
     return Row(
       children: [
         Icon(
-            gps['locked'] == true ? Icons.gps_fixed : Icons.gps_off,
-            color: gps['locked'] == true
-                ? lockedColor
-                : theme.iconTheme.color?.withOpacity(0.4),
+            isLocked ? Icons.gps_fixed : Icons.gps_off,
+            color: isLocked ? lockedColor : theme.iconTheme.color?.withOpacity(0.4),
             size: 22 * fontScale),
         SizedBox(width: 4 * fontScale),
         Text(
-          gps['locked'] == true
-              ? "${gps['lat'].toStringAsFixed(4)}, ${gps['lon'].toStringAsFixed(4)}"
+          isLocked
+              ? "${lat.toStringAsFixed(4)}, ${lon.toStringAsFixed(4)}"
               : "No Fix",
           style: TextStyle(
               color: theme.colorScheme.onBackground, fontSize: 14 * fontScale),
@@ -447,15 +423,11 @@ class _GPSStatus extends StatelessWidget {
 }
 
 class _BottomStatusBar extends StatelessWidget {
-  final Map gps;
-  final Map radio;
-  final Map battery;
+  final RadioController? radioController;
   final double fontScale;
   final bool compact;
   const _BottomStatusBar(
-      {required this.gps,
-      required this.radio,
-      required this.battery,
+      {required this.radioController,
       required this.fontScale,
       required this.compact});
   @override
@@ -463,6 +435,7 @@ class _BottomStatusBar extends StatelessWidget {
     final theme = Theme.of(context);
     final textColor = theme.colorScheme.onSurface.withOpacity(0.8);
     final iconColor = theme.colorScheme.onSurface.withOpacity(0.5);
+    final gpsTime = radioController?.gps?.time.toIso8601String() ?? '...';
 
     return Container(
       color: theme.colorScheme.surface,
@@ -472,33 +445,11 @@ class _BottomStatusBar extends StatelessWidget {
         children: [
           Icon(Icons.access_time, color: iconColor, size: 18 * fontScale),
           SizedBox(width: 3 * fontScale),
-          Text(gps['utc'],
-              style: TextStyle(color: textColor, fontSize: 13 * fontScale)),
-          SizedBox(width: 16 * fontScale),
-          Icon(Icons.gps_fixed, color: iconColor, size: 16 * fontScale),
-          SizedBox(width: 3 * fontScale),
-          Text(
-              gps['locked'] == true
-                  ? "${gps['lat'].toStringAsFixed(3)}, ${gps['lon'].toStringAsFixed(3)}"
-                  : "No GPS",
-              style: TextStyle(color: textColor, fontSize: 13 * fontScale)),
-          SizedBox(width: 16 * fontScale),
-          Icon(Icons.battery_full, color: iconColor, size: 16 * fontScale),
-          SizedBox(width: 3 * fontScale),
-          Text("${battery['percent']}%",
-              style: TextStyle(color: textColor, fontSize: 13 * fontScale)),
-          if (!compact) ...[
-            SizedBox(width: 16 * fontScale),
-            Icon(Icons.radio, color: iconColor, size: 16 * fontScale),
-            SizedBox(width: 3 * fontScale),
-            Text("${radio['model']} v${radio['fw']}",
-                style: TextStyle(color: textColor, fontSize: 13 * fontScale)),
-          ],
+          Text(gpsTime, style: TextStyle(color: textColor, fontSize: 13 * fontScale)),
           const Spacer(),
-          Icon(Icons.warning_amber, color: Colors.orange, size: 16 * fontScale),
+          Icon(Icons.info_outline, color: iconColor, size: 16 * fontScale),
           SizedBox(width: 3 * fontScale),
-          Text("All systems nominal",
-              style: TextStyle(color: textColor, fontSize: 13 * fontScale)),
+          Text("All systems nominal", style: TextStyle(color: textColor, fontSize: 13 * fontScale)),
         ],
       ),
     );

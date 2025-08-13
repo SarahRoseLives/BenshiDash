@@ -10,10 +10,10 @@ import 'package:geolocator/geolocator.dart' as geolocator;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../models/memory_list.dart';
 import '../../../benshi/protocol/protocol.dart';
-import '../home/dashboard.dart';
 import '../../widgets/main_layout.dart';
 import '../../../benshi/radio_controller.dart';
 import '../../../main.dart';
+import '../home/dashboard.dart';
 
 Future<List<Map<String, List<Channel>>>> _loadMemoryAssets() async {
   try {
@@ -39,7 +39,6 @@ Future<List<Map<String, List<Channel>>>> _loadMemoryAssets() async {
   }
 }
 
-
 class ChannelsScreen extends StatefulWidget {
   const ChannelsScreen({super.key});
 
@@ -54,7 +53,7 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
   RadioController? _radioController;
   bool _isSelectingMemory = false;
   List<Map<String, List<Channel>>> _allMemoryLists = [];
-
+  bool _isInEditMode = false;
 
   @override
   void initState() {
@@ -145,10 +144,11 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
 
       try {
         await _radioController!.writeChannel(updatedChannel);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Channel ${updatedChannel.channelId + 1} written."), duration: const Duration(seconds: 1)),
-        );
-        // Optimistically update local state instead of reloading all
+        if(mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text("Channel ${updatedChannel.channelId + 1} written."), duration: const Duration(seconds: 1)),
+          );
+        }
         if (mounted) {
           setState(() {
             _channels![index] = updatedChannel;
@@ -162,6 +162,59 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
           );
           setState(() => _isLoading = false);
         }
+      }
+    }
+  }
+
+  Future<void> _tuneToChannel(Channel channel) async {
+    if (_radioController == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Radio not connected.")),
+      );
+      return;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text("Tuning to Ch ${channel.channelId + 1}: ${channel.name.trim()}..."), duration: const Duration(seconds: 2)),
+    );
+
+    final currentStatus = _radioController!.status;
+    final currentSettings = _radioController!.settings;
+
+    if (currentStatus == null || currentSettings == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Radio state not fully loaded. Cannot tune.")),
+      );
+      return;
+    }
+
+    try {
+      Settings newSettings;
+      if (currentStatus.doubleChannel == ChannelType.B) {
+        newSettings = currentSettings.copyWith(channelB: channel.channelId);
+      } else {
+        newSettings = currentSettings.copyWith(channelA: channel.channelId);
+      }
+
+      await _radioController!.writeSettings(newSettings);
+
+      await Future.delayed(const Duration(milliseconds: 200));
+
+      if (mounted) {
+        Navigator.of(context).pushReplacement(
+          PageRouteBuilder(
+            pageBuilder: (context, _, __) => const DashboardScreen(),
+            transitionDuration: Duration.zero,
+            reverseTransitionDuration: Duration.zero,
+          ),
+        );
+      }
+
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Failed to tune: $e")),
+        );
       }
     }
   }
@@ -205,9 +258,11 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
       final List<Map<String, dynamic>> channelsJson = _channels!.map((c) => c.toJson()).toList();
       final jsonString = json.encode(channelsJson);
       await prefs.setString('memory_backup_$name', jsonString);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Saved backup as '$name'")),
-      );
+      if(mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Saved backup as '$name'")),
+        );
+      }
       await _loadAllMemoryLists();
     }
   }
@@ -321,16 +376,11 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
     return ValueListenableBuilder<RadioController?>(
       valueListenable: radioControllerNotifier,
       builder: (context, radioController, _) {
         return MainLayout(
           radioController: radioController,
-          radio: radio,
-          battery: battery,
-          gps: gps,
           child: LayoutBuilder(
             builder: (context, constraints) {
               return Column(
@@ -346,16 +396,15 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
                               children: [
                                 const CircularProgressIndicator(),
                                 const SizedBox(height: 16),
-                                Text(_statusMessage, style: theme.textTheme.titleMedium),
+                                Text(_statusMessage, style: Theme.of(context).textTheme.titleMedium),
                               ],
                             ),
                           )
                         : _isSelectingMemory
                             ? _buildMemorySelectionGrid(context)
                             : (_channels == null
-                                ? Center(child: Text(_statusMessage, style: theme.textTheme.titleMedium))
-                                : _buildChannelGrid(context, constraints)
-                              )
+                                ? Center(child: Text(_statusMessage, style: Theme.of(context).textTheme.titleMedium))
+                                : _buildChannelGrid(context)),
                   ),
                 ],
               );
@@ -370,52 +419,31 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
     final theme = Theme.of(context);
     final maxButtonWidth = (gridWidth / 4).clamp(100.0, 200.0);
 
-    return SizedBox(
-      width: gridWidth,
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
+    if (_isSelectingMemory) {
+      // Header for when the user is picking a memory list to load
+      return Row(
         children: [
-          _isSelectingMemory
-          ? ConstrainedBox(
-              constraints: BoxConstraints(maxWidth: maxButtonWidth),
-              child: SizedBox(
-                height: 44,
-                child: ElevatedButton.icon(
-                  icon: const Icon(Icons.cancel),
-                  onPressed: () => setState(() => _isSelectingMemory = false),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: theme.colorScheme.errorContainer,
-                    foregroundColor: theme.colorScheme.onErrorContainer,
-                    shape: const StadiumBorder(),
-                    textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 18),
-                  ),
-                  label: const Text("Cancel"),
+          ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: maxButtonWidth),
+            child: SizedBox(
+              height: 44,
+              child: ElevatedButton.icon(
+                icon: const Icon(Icons.cancel),
+                onPressed: () => setState(() => _isSelectingMemory = false),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: theme.colorScheme.errorContainer,
+                  foregroundColor: theme.colorScheme.onErrorContainer,
+                  shape: const StadiumBorder(),
+                  textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 18),
                 ),
-              ),
-            )
-          : ConstrainedBox(
-              constraints: BoxConstraints(maxWidth: maxButtonWidth),
-              child: SizedBox(
-                height: 44,
-                child: ElevatedButton.icon(
-                  icon: const Icon(Icons.travel_explore),
-                  onPressed: _importNearbyRepeaters,
-                  style: ElevatedButton.styleFrom(
-                    minimumSize: const Size(0, 44),
-                    backgroundColor: theme.colorScheme.secondaryContainer,
-                    foregroundColor: theme.colorScheme.onSecondaryContainer,
-                    shape: const StadiumBorder(),
-                    textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 18),
-                  ),
-                  label: const Text("GPS Import", overflow: TextOverflow.ellipsis),
-                ),
+                label: const Text("Cancel"),
               ),
             ),
-
+          ),
           Expanded(
             child: Center(
               child: Text(
-                _isSelectingMemory ? 'Select Memory to Load' : 'Channel Programming',
+                'Select Memory to Load',
                 style: theme.textTheme.headlineMedium?.copyWith(
                   color: theme.colorScheme.onBackground,
                   fontWeight: FontWeight.w700,
@@ -424,51 +452,99 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
               ),
             ),
           ),
-
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ConstrainedBox(
-                constraints: BoxConstraints(maxWidth: maxButtonWidth),
-                child: SizedBox(
-                  height: 44,
-                  child: ElevatedButton.icon(
-                    icon: const Icon(Icons.save_alt),
-                    onPressed: _isLoading || _isSelectingMemory ? null : _saveCurrentMemories,
-                    style: ElevatedButton.styleFrom(
-                      minimumSize: const Size(0, 44),
-                      backgroundColor: theme.colorScheme.secondaryContainer,
-                      foregroundColor: theme.colorScheme.onSecondaryContainer,
-                      shape: const StadiumBorder(),
-                      textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 18),
-                    ),
-                    label: const Text("Save Backup", overflow: TextOverflow.ellipsis),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              ConstrainedBox(
-                constraints: BoxConstraints(maxWidth: maxButtonWidth),
-                child: SizedBox(
-                  height: 44,
-                  child: ElevatedButton.icon(
-                    icon: const Icon(Icons.folder_open),
-                    onPressed: _isLoading || _isSelectingMemory ? null : _enterMemorySelectionMode,
-                    style: ElevatedButton.styleFrom(
-                      minimumSize: const Size(0, 44),
-                      backgroundColor: theme.colorScheme.secondaryContainer,
-                      foregroundColor: theme.colorScheme.onSecondaryContainer,
-                      shape: const StadiumBorder(),
-                      textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 18),
-                    ),
-                    label: const Text("Load Memories", overflow: TextOverflow.ellipsis),
-                  ),
-                ),
-              ),
-            ],
-          ),
+          // Placeholder to balance the row
+          SizedBox(width: maxButtonWidth * 2 + 8),
         ],
-      ),
+      );
+    }
+
+    // Normal header for channel tuning/editing
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: maxButtonWidth),
+          child: SizedBox(
+            height: 44,
+            child: ElevatedButton.icon(
+              icon: const Icon(Icons.travel_explore),
+              onPressed: _isLoading || !_isInEditMode ? null : _importNearbyRepeaters,
+              style: ElevatedButton.styleFrom(
+                minimumSize: const Size(0, 44),
+                backgroundColor: theme.colorScheme.secondaryContainer,
+                foregroundColor: theme.colorScheme.onSecondaryContainer,
+                shape: const StadiumBorder(),
+                textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 18),
+              ),
+              label: const Text("GPS Import", overflow: TextOverflow.ellipsis),
+            ),
+          ),
+        ),
+        Expanded(
+          child: Center(
+            child: Tooltip(
+              message: _isInEditMode
+                ? "Tap a channel below to edit its details."
+                : "Tap a channel below to tune the radio.",
+              child: TextButton.icon(
+                onPressed: _isLoading ? null : () => setState(() => _isInEditMode = !_isInEditMode),
+                icon: Icon(_isInEditMode ? Icons.check_circle_outline : Icons.track_changes_outlined),
+                label: Text(_isInEditMode ? "Edit Mode" : "Tune Mode"),
+                style: TextButton.styleFrom(
+                  foregroundColor: _isInEditMode ? theme.colorScheme.primary : theme.colorScheme.onSurface,
+                  backgroundColor: _isInEditMode ? theme.colorScheme.primary.withOpacity(0.12) : theme.cardTheme.color?.withOpacity(0.8),
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  shape: const StadiumBorder(),
+                  side: BorderSide(color: theme.dividerColor),
+                  textStyle: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ),
+          ),
+        ),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: maxButtonWidth),
+              child: SizedBox(
+                height: 44,
+                child: ElevatedButton.icon(
+                  icon: const Icon(Icons.save_alt),
+                  onPressed: _isLoading || !_isInEditMode ? null : _saveCurrentMemories,
+                  style: ElevatedButton.styleFrom(
+                    minimumSize: const Size(0, 44),
+                    backgroundColor: theme.colorScheme.secondaryContainer,
+                    foregroundColor: theme.colorScheme.onSecondaryContainer,
+                    shape: const StadiumBorder(),
+                    textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 18),
+                  ),
+                  label: const Text("Save Backup", overflow: TextOverflow.ellipsis),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: maxButtonWidth),
+              child: SizedBox(
+                height: 44,
+                child: ElevatedButton.icon(
+                  icon: const Icon(Icons.folder_open),
+                  onPressed: _isLoading || !_isInEditMode ? null : _enterMemorySelectionMode,
+                  style: ElevatedButton.styleFrom(
+                    minimumSize: const Size(0, 44),
+                    backgroundColor: theme.colorScheme.secondaryContainer,
+                    foregroundColor: theme.colorScheme.onSecondaryContainer,
+                    shape: const StadiumBorder(),
+                    textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 18),
+                  ),
+                  label: const Text("Load Memories", overflow: TextOverflow.ellipsis),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
     );
   }
 
@@ -517,46 +593,57 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
     );
   }
 
-  Widget _buildChannelGrid(BuildContext context, BoxConstraints constraints) {
+  /// MODIFIED: Now uses LayoutBuilder to dynamically size buttons to fit the available space.
+  Widget _buildChannelGrid(BuildContext context) {
     final theme = Theme.of(context);
     final bool isDark = theme.brightness == Brightness.dark;
+    final int totalChannels = _channels!.length;
     const int crossAxisCount = 8;
-    const int rowCount = 4;
-    const double gridSpacing = 8.0;
+    final int rowCount = (totalChannels / crossAxisCount).ceil();
 
-    final double gridWidth = constraints.maxWidth;
-    final double gridHeight = constraints.maxHeight;
-    final double availableWidth = gridWidth - (gridSpacing * (crossAxisCount + 1));
-    final double availableHeight = gridHeight - (gridSpacing * (rowCount + 1));
-    final double buttonWidth = (availableWidth / crossAxisCount).clamp(36.0, 96.0);
-    final double buttonHeight = (availableHeight / rowCount).clamp(36.0, 96.0);
-    final double childAspectRatio = buttonWidth / buttonHeight;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final double gridSpacing = 8.0;
 
-    return SizedBox(
-      width: gridWidth,
-      child: GridView.builder(
-        physics: const NeverScrollableScrollPhysics(),
-        padding: EdgeInsets.symmetric(horizontal: gridSpacing),
-        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: crossAxisCount,
-          mainAxisSpacing: gridSpacing,
-          crossAxisSpacing: gridSpacing,
-          childAspectRatio: childAspectRatio,
-        ),
-        itemCount: _channels!.length,
-        itemBuilder: (context, index) {
-          final channel = _channels![index];
-          return GestureDetector(
-            onTap: () => _editChannel(index),
-            child: _ChannelButton(
-              channel: channel,
-              isDark: isDark,
-              theme: theme,
-              buttonHeight: buttonHeight,
-            ),
-          );
-        },
-      ),
+        // Calculate available height, subtracting spacing between rows and a small vertical padding
+        final double verticalPadding = gridSpacing;
+        final double availableHeight = constraints.maxHeight - (rowCount > 0 ? (rowCount - 1) * gridSpacing : 0) - verticalPadding;
+
+        final double cellHeight = rowCount > 0 ? availableHeight / rowCount : 0;
+        final double cellWidth = (constraints.maxWidth - (crossAxisCount > 0 ? (crossAxisCount - 1) * gridSpacing : 0)) / crossAxisCount;
+
+        final double childAspectRatio = (cellHeight > 0 && cellWidth > 0) ? cellWidth / cellHeight : 1.0;
+
+        return GridView.builder(
+          physics: const NeverScrollableScrollPhysics(),
+          padding: EdgeInsets.symmetric(horizontal: gridSpacing / 2, vertical: verticalPadding / 2),
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: crossAxisCount,
+            mainAxisSpacing: gridSpacing,
+            crossAxisSpacing: gridSpacing,
+            childAspectRatio: childAspectRatio,
+          ),
+          itemCount: _channels!.length,
+          itemBuilder: (context, index) {
+            final channel = _channels![index];
+            return GestureDetector(
+              onTap: () {
+                if (_isInEditMode) {
+                  _editChannel(index);
+                } else {
+                  _tuneToChannel(channel);
+                }
+              },
+              child: _ChannelButton(
+                channel: channel,
+                isDark: isDark,
+                theme: theme,
+                buttonHeight: cellHeight,
+              ),
+            );
+          },
+        );
+      },
     );
   }
 }
@@ -599,19 +686,18 @@ class _ChannelButton extends StatelessWidget {
               ),
               const SizedBox(height: 2),
               Text(
-                channel.name.trim(),
+                channel.name.trim().isEmpty ? '[empty]' : channel.name.trim(),
                 style: TextStyle(
                   fontSize: buttonHeight * 0.16,
                   fontWeight: FontWeight.w600,
                   color: textColor,
                   overflow: TextOverflow.ellipsis,
-                  decoration: TextDecoration.underline,
                 ),
                 textAlign: TextAlign.center,
                 maxLines: 1,
               ),
               Text(
-                channel.rxFreq.toStringAsFixed(2),
+                channel.rxFreq == 0.0 ? '- - -' : channel.rxFreq.toStringAsFixed(2),
                 style: TextStyle(fontSize: buttonHeight * 0.15, fontWeight: FontWeight.w500, color: subColor),
                 textAlign: TextAlign.center,
               ),
@@ -820,32 +906,36 @@ class _ChannelEditorState extends State<_ChannelEditor> {
 
   Widget _buildToneEditor(String label, String currentType, TextEditingController controller, ValueChanged<String> onTypeChanged) {
     return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8.0),
-        child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-                Expanded(
-                    flex: 2,
-                    child: _buildDropdown(label, currentType, ['None', 'CTCSS', 'DCS'], onTypeChanged),
+      padding: const EdgeInsets.symmetric(vertical: 8.0),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            flex: 2,
+            child: _buildDropdown(label, currentType, ['None', 'CTCSS', 'DCS'], onTypeChanged),
+          ),
+          if (currentType != 'None') ...[
+            const SizedBox(width: 8),
+            Expanded(
+              flex: 3,
+              child: TextFormField(
+                controller: controller,
+                decoration: InputDecoration(
+                  labelText: currentType == 'CTCSS' ? 'Tone (Hz)' : 'Code',
+                  border: const OutlineInputBorder(),
                 ),
-                if (currentType != 'None') ...[
-                    const SizedBox(width: 8),
-                    Expanded(
-                        flex: 3,
-                        child: TextFormField(
-                            controller: controller,
-                            decoration: InputDecoration(
-                                labelText: currentType == 'CTCSS' ? 'Tone (Hz)' : 'Code',
-                                border: const OutlineInputBorder(),
-                            ),
-                            keyboardType: TextInputType.number,
-                            inputFormatters: [FilteringTextInputFormatter.allow(currentType == 'CTCSS' ? RegExp(r'[\d.]') : RegExp(r'[\d]'))],
-                            validator: (v) => v == null || v.isEmpty ? 'Required' : null,
-                        ),
-                    ),
+                keyboardType: TextInputType.number,
+                inputFormatters: [
+                  FilteringTextInputFormatter.allow(
+                    currentType == 'CTCSS' ? RegExp(r'[\d.]') : RegExp(r'[\d]')
+                  )
                 ],
-            ],
-        ),
+                validator: (v) => v == null || v.isEmpty ? 'Required' : null,
+              ),
+            ),
+          ],
+        ],
+      ),
     );
   }
 

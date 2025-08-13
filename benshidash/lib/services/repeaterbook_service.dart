@@ -70,7 +70,7 @@ class RepeaterBookService {
           return (freq >= 144 && freq <= 148) || (freq >= 420 && freq <= 450);
         })
         .map((r) {
-          final dist = _haversine(latitude, longitude, r.latitude, r.longitude);
+          final dist = haversineDistance(latitude, longitude, r.latitude, r.longitude);
           return MapEntry(r, dist);
         })
         .toList();
@@ -81,8 +81,9 @@ class RepeaterBookService {
     return top32;
   }
 
-  // Simple haversine formula for distance in miles
-  static double _haversine(double lat1, double lon1, double lat2, double lon2) {
+  // --- MODIFIED: Made haversineDistance static and public ---
+  /// Calculates the distance between two coordinates in miles.
+  static double haversineDistance(double lat1, double lon1, double lat2, double lon2) {
     const R = 3958.8; // Radius of Earth in miles
     final dLat = _deg2rad(lat2 - lat1);
     final dLon = _deg2rad(lon2 - lon1);

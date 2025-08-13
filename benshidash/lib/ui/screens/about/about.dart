@@ -137,17 +137,11 @@ class AboutScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    // Listen for connection status changes from the global notifier
     return ValueListenableBuilder<RadioController?>(
       valueListenable: radioControllerNotifier,
       builder: (context, radioController, _) {
         return MainLayout(
-          // --- THIS IS THE CHANGE ---
           radioController: radioController,
-          // --- END OF CHANGE ---
-          radio: radio,
-          battery: battery,
-          gps: gps,
           child: Center(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 28.0, vertical: 32.0),

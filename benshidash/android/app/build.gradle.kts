@@ -5,8 +5,11 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+import java.util.Properties
+import java.io.FileInputStream
+
 android {
-    namespace = "com.example.benshidash"
+    namespace = "com.sarahsforge.benshidash"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = "27.0.12077973"
 
@@ -20,16 +23,39 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.example.benshidash"
-        minSdk = 21 // <-- REVERTED to API 23
+        applicationId = "com.sarahsforge.benshidash"
+        minSdk = 21
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
 
+    // --- Begin release signing config ---
+    val keyProperties = Properties()
+    val keyPropertiesFile = rootProject.file("key.properties")
+    if (keyPropertiesFile.exists()) {
+        keyProperties.load(FileInputStream(keyPropertiesFile))
+    }
+
+    signingConfigs {
+        create("release") {
+            storeFile = file(keyProperties["storeFile"] ?: "")
+            storePassword = keyProperties["storePassword"] as String?
+            keyAlias = keyProperties["keyAlias"] as String?
+            keyPassword = keyProperties["keyPassword"] as String?
+        }
+    }
+    // --- End release signing config ---
+
     buildTypes {
-        release {
-            signingConfig = signingConfigs.getByName("debug")
+        getByName("release") {
+            signingConfig = signingConfigs.getByName("release")
+            isMinifyEnabled = false
+            isShrinkResources = false
+            // (Other existing configs)
+        }
+        getByName("debug") {
+            // Keep debug config as is
         }
     }
 }
