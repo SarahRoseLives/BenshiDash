@@ -285,45 +285,131 @@ class _DeviceListDialog extends StatefulWidget {
 
 class _DeviceListDialogState extends State<_DeviceListDialog> {
   StreamSubscription<BluetoothDiscoveryResult>? _streamSubscription;
-  List<BluetoothDiscoveryResult> results = [];
-  bool isDiscovering = false;
-  bool isConnecting = false;
+  List<BluetoothDevice> _bondedDevices = [];
+  List<BluetoothDiscoveryResult> _discoveredResults = [];
+  bool _isDiscovering = false;
+  bool _isConnecting = false;
 
   @override
   void initState() {
     super.initState();
-    _startDiscovery();
+    _refreshDeviceLists();
   }
 
-  void _startDiscovery() {
-    setState(() { isDiscovering = true; });
+  Future<void> _refreshDeviceLists() async {
+    setState(() {
+      _isDiscovering = true;
+      _bondedDevices = [];
+      _discoveredResults = [];
+    });
+
+    try {
+      _bondedDevices = await FlutterBluetoothSerial.instance.getBondedDevices();
+    } catch (e) {
+      if (kDebugMode) print("Error getting bonded devices: $e");
+    } finally {
+      if(mounted) setState(() {});
+    }
+
     _streamSubscription = FlutterBluetoothSerial.instance.startDiscovery().listen((r) {
-      setState(() {
-        final existingIndex = results.indexWhere((element) => element.device.address == r.device.address);
-        if (existingIndex >= 0) {
-          results[existingIndex] = r;
-        } else {
-          results.add(r);
-        }
-      });
+      if(mounted) {
+        setState(() {
+          final isAlreadyBonded = _bondedDevices.any((d) => d.address == r.device.address);
+          final isAlreadyDiscovered = _discoveredResults.any((res) => res.device.address == r.device.address);
+
+          if (!isAlreadyBonded && !isAlreadyDiscovered) {
+            _discoveredResults.add(r);
+          }
+        });
+      }
     });
     _streamSubscription!.onDone(() {
-      setState(() { isDiscovering = false; });
+      if (mounted) setState(() => _isDiscovering = false);
     });
+  }
+
+  Future<void> _connectToDevice(BluetoothDevice device) async {
+    setState(() => _isConnecting = true);
+    final navigator = Navigator.of(context);
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final controller = RadioController(device: device);
+      await controller.connect();
+      radioControllerNotifier.value = controller;
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(PREF_LAST_DEVICE_ADDRESS, device.address);
+      navigator.pop();
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Successfully connected!'), backgroundColor: Colors.green),
+      );
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text('Connection failed: $e'), backgroundColor: Colors.red),
+      );
+      if (mounted) {
+        setState(() => _isConnecting = false);
+      }
+    }
   }
 
   @override
   void dispose() {
     _streamSubscription?.cancel();
+    FlutterBluetoothSerial.instance.cancelDiscovery();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    List<Widget> listItems = [];
+
+    listItems.add(
+      ListTile(
+        dense: true,
+        title: Text("Paired Devices", style: theme.textTheme.titleSmall),
+      )
+    );
+    if (_bondedDevices.isEmpty) {
+      listItems.add(const ListTile(subtitle: Text("No previously paired devices found.")));
+    } else {
+      listItems.addAll(
+        _bondedDevices.map((device) => ListTile(
+            leading: const Icon(Icons.radio),
+            title: Text(device.name ?? "Unknown Device"),
+            subtitle: Text(device.address),
+            onTap: _isConnecting ? null : () => _connectToDevice(device),
+          ))
+      );
+    }
+
+    listItems.add(const Divider());
+    listItems.add(
+      ListTile(
+        dense: true,
+        title: Text("Available Devices", style: theme.textTheme.titleSmall),
+      )
+    );
+
+    if (_discoveredResults.isEmpty && !_isDiscovering) {
+      listItems.add(const ListTile(subtitle: Text("No new devices found.")));
+    } else {
+      listItems.addAll(
+        _discoveredResults.map((result) => ListTile(
+            leading: const Icon(Icons.bluetooth_searching),
+            title: Text(result.device.name ?? "Unknown Device"),
+            subtitle: Text(result.device.address),
+            trailing: Text("${result.rssi} dBm"),
+            onTap: _isConnecting ? null : () => _connectToDevice(result.device),
+          ))
+      );
+    }
+
     return AlertDialog(
       title: Row(children: [
         const Text('Select a Radio'),
-        if (isDiscovering || isConnecting)
+        if (_isDiscovering || _isConnecting)
           const Padding(
             padding: EdgeInsets.only(left: 8.0),
             child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
@@ -331,40 +417,9 @@ class _DeviceListDialogState extends State<_DeviceListDialog> {
       ]),
       content: SizedBox(
         width: double.maxFinite,
-        child: ListView.builder(
+        child: ListView(
           shrinkWrap: true,
-          itemCount: results.length,
-          itemBuilder: (context, index) {
-            BluetoothDiscoveryResult result = results[index];
-            return ListTile(
-              leading: const Icon(Icons.radio),
-              title: Text(result.device.name ?? 'Unknown Device'),
-              subtitle: Text(result.device.address),
-              onTap: isConnecting ? null : () async {
-                setState(() { isConnecting = true; });
-                final navigator = Navigator.of(context);
-                final messenger = ScaffoldMessenger.of(context);
-                try {
-                  final controller = RadioController(device: result.device);
-                  await controller.connect();
-                  radioControllerNotifier.value = controller;
-                  final prefs = await SharedPreferences.getInstance();
-                  await prefs.setString(PREF_LAST_DEVICE_ADDRESS, result.device.address);
-                  navigator.pop();
-                  messenger.showSnackBar(
-                    const SnackBar(content: Text('Successfully connected!'), backgroundColor: Colors.green),
-                  );
-                } catch (e) {
-                  messenger.showSnackBar(
-                    SnackBar(content: Text('Connection failed: $e'), backgroundColor: Colors.red),
-                  );
-                  if (mounted) {
-                    setState(() { isConnecting = false; });
-                  }
-                }
-              },
-            );
-          },
+          children: listItems,
         ),
       ),
       actions: [TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel'))],

@@ -54,7 +54,7 @@ class _AprsMapContentState extends State<_AprsMapContent> {
     if (_radioController != null) {
       _packets = _radioController!.aprsPackets;
       _radioController!.addListener(_onDataUpdate);
-      _activateAprsMode(); // --- NEW: Call to activate APRS mode ---
+      _activateAprsMode();
     }
     // Listen for changes from all relevant sources
     showAprsPathsNotifier.addListener(_onDataUpdate);
@@ -71,7 +71,6 @@ class _AprsMapContentState extends State<_AprsMapContent> {
     super.dispose();
   }
 
-  /// --- NEW: Activates dual watch and tunes VFO B to the APRS frequency ---
   Future<void> _activateAprsMode() async {
     if (_radioController == null || !_radioController!.isReady) {
       if (mounted) {
@@ -130,8 +129,6 @@ class _AprsMapContentState extends State<_AprsMapContent> {
     }
   }
 
-
-  /// A single update handler for all data changes.
   void _onDataUpdate() {
     if (mounted) {
       setState(() {
@@ -140,6 +137,17 @@ class _AprsMapContentState extends State<_AprsMapContent> {
         _updatePathLines();
       });
     }
+  }
+
+  void _showPacketDetails(BuildContext context, AprsPacket packet) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        return _PacketDetailsSheet(packet: packet);
+      },
+    );
   }
 
   void _updateCurrentCenter() {
@@ -214,7 +222,10 @@ class _AprsMapContentState extends State<_AprsMapContent> {
         width: 80.0,
         height: 80.0,
         point: LatLng(packet.latitude!, packet.longitude!),
-        child: _StationMarker(packet: packet),
+        child: GestureDetector(
+          onTap: () => _showPacketDetails(context, packet),
+          child: _StationMarker(packet: packet),
+        ),
       );
     }).toList();
 
@@ -299,6 +310,112 @@ class _StationMarker extends StatelessWidget {
                 fontSize: 12,
                 fontWeight: FontWeight.bold,
               ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PacketDetailsSheet extends StatelessWidget {
+  final AprsPacket packet;
+  const _PacketDetailsSheet({required this.packet});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    return SizedBox(
+      height: MediaQuery.of(context).size.height * 0.65,
+      child: Container(
+        margin: const EdgeInsets.all(12),
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+        decoration: BoxDecoration(
+          color: theme.scaffoldBackgroundColor,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: theme.dividerColor),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildHeader(theme),
+            const SizedBox(height: 16),
+            Expanded(
+              child: ListView(
+                children: [
+                  _buildInfoRow(theme, Icons.alt_route, "Path", '${packet.source} > ${packet.destination} via ${packet.path.join(', ')}'),
+                  _buildInfoRow(theme, Icons.location_pin, "Position", 'Lat: ${packet.latitude?.toStringAsFixed(4)}, Lon: ${packet.longitude?.toStringAsFixed(4)}'),
+                  if (packet.comment != null && packet.comment!.trim().isNotEmpty)
+                    _buildInfoRow(theme, Icons.comment, "Comment", packet.comment!),
+                  const Divider(height: 32),
+                  Text("Raw Packet Body", style: theme.textTheme.titleMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    width: double.infinity,
+                    decoration: BoxDecoration(
+                      color: isDark ? Colors.black.withOpacity(0.3) : Colors.grey.shade200,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      packet.body,
+                      style: theme.textTheme.bodyLarge?.copyWith(fontFamily: 'monospace', fontSize: 16),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                ),
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text("Close"),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHeader(ThemeData theme) {
+    return Row(
+      children: [
+        Icon(packet.symbolIcon, size: 40, color: theme.colorScheme.primary),
+        const SizedBox(width: 16),
+        Expanded(
+          child: Text(
+            "Packet: ${packet.source}",
+            style: theme.textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.bold),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildInfoRow(ThemeData theme, IconData icon, String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8.0),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 3.0),
+            child: Icon(icon, size: 22, color: theme.colorScheme.onSurfaceVariant),
+          ),
+          const SizedBox(width: 16),
+          Text("$label:", style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              value,
+              style: theme.textTheme.bodyLarge?.copyWith(color: theme.colorScheme.onSurface),
             ),
           ),
         ],
