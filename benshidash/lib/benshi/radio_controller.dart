@@ -578,10 +578,18 @@ class RadioController extends ChangeNotifier {
 
   Future<void> setRadioScan(bool enable) async {
     if (settings == null) await getSettings();
-    if (settings == null) throw Exception(
-        "Could not load radio settings to modify them.");
+    if (settings == null) {
+      throw Exception("Could not load radio settings to modify them.");
+    }
 
-    final newSettings = settings!.copyWith(scan: enable);
+    // If enabling scan, also disable dual watch as it can interfere.
+    final Settings newSettings;
+    if (enable) {
+      newSettings = settings!.copyWith(scan: true, doubleChannel: ChannelType.OFF.value);
+    } else {
+      newSettings = settings!.copyWith(scan: false);
+    }
+
 
     // 1. Write the new settings object to the radio.
     await writeSettings(newSettings);
