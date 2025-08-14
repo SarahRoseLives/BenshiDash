@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:benshidash/benshi/protocol/protocol.dart';
 import 'package:benshidash/models/aprs_packet.dart';
 import 'package:benshidash/services/location_service.dart';
 import 'package:flutter/foundation.dart';
@@ -53,6 +54,7 @@ class _AprsMapContentState extends State<_AprsMapContent> {
     if (_radioController != null) {
       _packets = _radioController!.aprsPackets;
       _radioController!.addListener(_onDataUpdate);
+      _activateAprsMode(); // --- NEW: Call to activate APRS mode ---
     }
     // Listen for changes from all relevant sources
     showAprsPathsNotifier.addListener(_onDataUpdate);
@@ -69,6 +71,66 @@ class _AprsMapContentState extends State<_AprsMapContent> {
     super.dispose();
   }
 
+  /// --- NEW: Activates dual watch and tunes VFO B to the APRS frequency ---
+  Future<void> _activateAprsMode() async {
+    if (_radioController == null || !_radioController!.isReady) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Radio not ready for APRS mode.")),
+        );
+      }
+      return;
+    }
+
+    const aprsChannelId = 251; // Use a high, likely unused channel
+    final aprsFreq = aprsFrequencyNotifier.value;
+
+    try {
+      // 1. Create a channel object for the APRS frequency.
+      final aprsChannel = Channel(
+        channelId: aprsChannelId,
+        name: 'APRS',
+        rxFreq: aprsFreq,
+        txFreq: aprsFreq,
+        rxMod: ModulationType.FM,
+        txMod: ModulationType.FM,
+        bandwidth: BandwidthType.WIDE, // APRS is typically wide
+        scan: false,
+        txDisable: true, // Don't transmit on this channel from the app
+        txAtMaxPower: false,
+        txAtMedPower: false,
+      );
+
+      // 2. Write this temporary channel to the radio.
+      await _radioController!.writeChannel(aprsChannel);
+      await Future.delayed(const Duration(milliseconds: 100)); // Give radio time
+
+      // 3. Get current settings and update them for dual watch on VFO B.
+      final currentSettings = _radioController!.settings;
+      if (currentSettings != null) {
+        final newSettings = currentSettings.copyWith(
+          doubleChannel: ChannelType.B.index, // Enable Dual Watch, VFO B active
+          channelB: aprsChannelId,
+        );
+        await _radioController!.writeSettings(newSettings);
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("APRS mode activated on VFO B ($aprsFreq MHz).")),
+        );
+      }
+
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Failed to activate APRS mode: $e")),
+        );
+      }
+    }
+  }
+
+
   /// A single update handler for all data changes.
   void _onDataUpdate() {
     if (mounted) {
@@ -83,7 +145,6 @@ class _AprsMapContentState extends State<_AprsMapContent> {
   void _updateCurrentCenter() {
     LatLng? newCenter;
 
-    // --- MODIFIED: Added debug case ---
     if (gpsSourceNotifier.value == GpsSource.device && locationService.currentPosition != null) {
       final pos = locationService.currentPosition!;
       newCenter = LatLng(pos.latitude, pos.longitude);
@@ -165,7 +226,7 @@ class _AprsMapContentState extends State<_AprsMapContent> {
             mapController: _mapController,
             options: MapOptions(
               initialCenter: _currentCenter,
-              initialZoom: 12.0,
+              initialZoom: 8.0,
               minZoom: 5,
               maxZoom: 18,
             ),

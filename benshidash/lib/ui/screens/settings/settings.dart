@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:benshidash/services/location_service.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_bluetooth_serial/flutter_bluetooth_serial.dart';
 import '../../../benshi/radio_controller.dart';
 import '../../../main.dart';
@@ -31,6 +32,11 @@ const String PREF_GPS_SOURCE = 'gps_source';
 
 final ValueNotifier<double> aprsNearbyRadiusNotifier = ValueNotifier(50.0);
 const String PREF_APRS_RADIUS = 'aprs_nearby_radius';
+
+// --- NEW: Added APRS frequency setting ---
+final ValueNotifier<double> aprsFrequencyNotifier = ValueNotifier(144.390);
+const String PREF_APRS_FREQUENCY = 'aprs_frequency';
+// -----------------------------------------
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -79,11 +85,56 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await prefs.setDouble(PREF_APRS_RADIUS, value);
   }
 
+  // --- NEW: Method to show a dialog for editing the APRS frequency ---
+  Future<void> _editAprsFrequency(BuildContext context) async {
+    final TextEditingController controller = TextEditingController(
+      text: aprsFrequencyNotifier.value.toStringAsFixed(3),
+    );
+    final newFreqString = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Set APRS Frequency"),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(
+            labelText: "Frequency (MHz)",
+            border: OutlineInputBorder(),
+          ),
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d.]'))],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text("Cancel")),
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(controller.text),
+            child: const Text("Save"),
+          ),
+        ],
+      ),
+    );
+
+    if (newFreqString != null) {
+      final double? newFreq = double.tryParse(newFreqString);
+      if (newFreq != null) {
+        aprsFrequencyNotifier.value = newFreq;
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setDouble(PREF_APRS_FREQUENCY, newFreq);
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("Invalid frequency format.")),
+          );
+        }
+      }
+    }
+  }
+
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return AnimatedBuilder(
-      animation: Listenable.merge([themeNotifier, showAprsPathsNotifier, gpsSourceNotifier, aprsNearbyRadiusNotifier]),
+      animation: Listenable.merge([themeNotifier, showAprsPathsNotifier, gpsSourceNotifier, aprsNearbyRadiusNotifier, aprsFrequencyNotifier]),
       builder: (context, child) {
         return ValueListenableBuilder<RadioController?>(
           valueListenable: radioControllerNotifier,
@@ -131,6 +182,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           ),
                         ),
                         const Divider(height: 1),
+                        // --- NEW: APRS Frequency Setting ---
+                        ListTile(
+                          leading: Icon(Icons.track_changes, color: theme.colorScheme.primary),
+                          title: const Text('APRS Frequency'),
+                          subtitle: Text('${aprsFrequencyNotifier.value.toStringAsFixed(3)} MHz'),
+                          trailing: const Icon(Icons.edit),
+                          onTap: () => _editAprsFrequency(context),
+                        ),
+                        const Divider(height: 1),
+                        // ------------------------------------
                         SwitchListTile(
                           title: const Text('Show APRS Packet Paths'),
                           subtitle: const Text('Draw lines showing the path a packet took.'),

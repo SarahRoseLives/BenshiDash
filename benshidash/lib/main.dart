@@ -23,8 +23,10 @@ Future<void> _loadSettings(SharedPreferences prefs) async {
   showAprsPathsNotifier.value = prefs.getBool(PREF_SHOW_APRS_PATHS) ?? false;
   final savedSource = GpsSource.values[prefs.getInt(PREF_GPS_SOURCE) ?? GpsSource.radio.index];
   gpsSourceNotifier.value = savedSource;
-  // --- NEW: Load the APRS radius setting ---
   aprsNearbyRadiusNotifier.value = prefs.getDouble(PREF_APRS_RADIUS) ?? 50.0;
+  // --- NEW: Load the APRS frequency setting ---
+  aprsFrequencyNotifier.value = prefs.getDouble(PREF_APRS_FREQUENCY) ?? 144.390;
+
 
   // Start the location service if the saved preference is 'device'
   if (savedSource == GpsSource.device) {
