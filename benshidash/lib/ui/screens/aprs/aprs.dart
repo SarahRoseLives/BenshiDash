@@ -1,3 +1,4 @@
+// ui/screens/aprs/aprs.dart
 import 'dart:async';
 import 'package:benshidash/benshi/protocol/protocol.dart';
 import 'package:benshidash/models/aprs_packet.dart';
@@ -9,7 +10,10 @@ import 'package:latlong2/latlong.dart';
 import '../../../benshi/radio_controller.dart';
 import '../../../main.dart'; // To get the global notifier
 import '../../widgets/main_layout.dart';
-import '../settings/settings.dart'; // Import settings to access the notifier
+import '../settings/settings.dart'; // Import settings to access the notifier AND top-level functions
+// --- Add Caching Import ---
+import 'package:flutter_map_tile_caching/flutter_map_tile_caching.dart';
+// --------------------------
 
 class AprsScreen extends StatelessWidget {
   const AprsScreen({super.key});
@@ -23,7 +27,11 @@ class AprsScreen extends StatelessWidget {
           radioController: radioController,
           child: radioController == null
               ? const Center(child: Text("Connect to a radio to view APRS data."))
-              : const _AprsMapContent(),
+              // Use AnimatedBuilder to listen to offline/home notifiers
+              : AnimatedBuilder(
+                  animation: Listenable.merge([offlineModeNotifier, homeLocationNotifier]),
+                  builder: (context, _) => const _AprsMapContent(),
+                ),
         );
       },
     );
@@ -31,7 +39,7 @@ class AprsScreen extends StatelessWidget {
 }
 
 class _AprsMapContent extends StatefulWidget {
-  const _AprsMapContent();
+  const _AprsMapContent({super.key});
 
   @override
   State<_AprsMapContent> createState() => _AprsMapContentState();
@@ -43,9 +51,9 @@ class _AprsMapContentState extends State<_AprsMapContent> {
   List<AprsPacket> _packets = [];
   List<Polyline> _pathPolylines = [];
 
-  // Default center if no GPS is available yet
-  static const LatLng _initialCenter = LatLng(41.737, -80.771);
-  LatLng _currentCenter = _initialCenter;
+  static const LatLng _initialCenter = LatLng(41.737, -80.771); // Example: Jefferson, OH
+
+  late FMTCTileProvider _tileProvider;
 
   @override
   void initState() {
@@ -54,12 +62,18 @@ class _AprsMapContentState extends State<_AprsMapContent> {
     if (_radioController != null) {
       _packets = _radioController!.aprsPackets;
       _radioController!.addListener(_onDataUpdate);
-      _activateAprsMode();
+      if(_radioController?.settings?.channelB != 251 || _radioController?.settings?.doubleChannel != ChannelType.B.index) {
+          _activateAprsMode();
+      }
     }
-    // Listen for changes from all relevant sources
     showAprsPathsNotifier.addListener(_onDataUpdate);
     gpsSourceNotifier.addListener(_onDataUpdate);
     locationService.addListener(_onDataUpdate);
+    homeLocationNotifier.addListener(_centerOnHomeIfNeeded);
+    offlineModeNotifier.addListener(_onDataUpdate); // Listen for offline mode changes too
+
+    _updateTileProvider();
+    _centerOnHomeIfNeeded();
   }
 
   @override
@@ -68,7 +82,37 @@ class _AprsMapContentState extends State<_AprsMapContent> {
     showAprsPathsNotifier.removeListener(_onDataUpdate);
     gpsSourceNotifier.removeListener(_onDataUpdate);
     locationService.removeListener(_onDataUpdate);
+    homeLocationNotifier.removeListener(_centerOnHomeIfNeeded);
+    offlineModeNotifier.removeListener(_onDataUpdate);
+    _mapController.dispose();
     super.dispose();
+  }
+
+  void _updateTileProvider() {
+     _tileProvider = FMTCTileProvider.allStores(
+        // --- CORRECTED ENUM NAME AND VALUE from WaveADSB Example ---
+        allStoresStrategy: BrowseStoreStrategy.readUpdateCreate,
+        // ---------------------------------------------------------
+        loadingStrategy: offlineModeNotifier.value
+            ? BrowseLoadingStrategy.cacheOnly
+            : BrowseLoadingStrategy.cacheFirst,
+     );
+     // If the widget is already built, trigger a rebuild to use the new provider
+     if (mounted) {
+       setState(() {});
+     }
+  }
+
+
+  void _centerOnHomeIfNeeded() {
+      final homeLoc = homeLocationNotifier.value;
+      if (homeLoc != null && mounted) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted && _mapController.camera.center != homeLoc) { // Avoid unnecessary moves
+              _mapController.move(homeLoc, _mapController.camera.zoom);
+            }
+          });
+      }
   }
 
   Future<void> _activateAprsMode() async {
@@ -81,37 +125,29 @@ class _AprsMapContentState extends State<_AprsMapContent> {
       return;
     }
 
-    const aprsChannelId = 251; // Use a high, likely unused channel
+    const aprsChannelId = 251;
     final aprsFreq = aprsFrequencyNotifier.value;
 
     try {
-      // 1. Create a channel object for the APRS frequency.
       final aprsChannel = Channel(
-        channelId: aprsChannelId,
-        name: 'APRS',
-        rxFreq: aprsFreq,
-        txFreq: aprsFreq,
-        rxMod: ModulationType.FM,
-        txMod: ModulationType.FM,
-        bandwidth: BandwidthType.WIDE, // APRS is typically wide
-        scan: false,
-        txDisable: true, // Don't transmit on this channel from the app
-        txAtMaxPower: false,
-        txAtMedPower: false,
+        channelId: aprsChannelId, name: 'APRS', rxFreq: aprsFreq, txFreq: aprsFreq,
+        rxMod: ModulationType.FM, txMod: ModulationType.FM, bandwidth: BandwidthType.WIDE,
+        scan: false, txDisable: true, txAtMaxPower: false, txAtMedPower: false,
+        talkAround: false, preDeEmphBypass: false, sign: false,
+        fixedFreq: false, fixedBandwidth: false, fixedTxPower: false, mute: false,
       );
 
-      // 2. Write this temporary channel to the radio.
       await _radioController!.writeChannel(aprsChannel);
-      await Future.delayed(const Duration(milliseconds: 100)); // Give radio time
+      await Future.delayed(const Duration(milliseconds: 100));
 
-      // 3. Get current settings and update them for dual watch on VFO B.
-      final currentSettings = _radioController!.settings;
+      final currentSettings = _radioController!.settings ?? await _radioController!.getSettings();
       if (currentSettings != null) {
         final newSettings = currentSettings.copyWith(
-          doubleChannel: ChannelType.B.index, // Enable Dual Watch, VFO B active
-          channelB: aprsChannelId,
+          doubleChannel: ChannelType.B.index, channelB: aprsChannelId,
         );
         await _radioController!.writeSettings(newSettings);
+      } else {
+         throw Exception("Could not load current radio settings.");
       }
 
       if (mounted) {
@@ -119,7 +155,6 @@ class _AprsMapContentState extends State<_AprsMapContent> {
           SnackBar(content: Text("APRS mode activated on VFO B ($aprsFreq MHz).")),
         );
       }
-
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -131,6 +166,7 @@ class _AprsMapContentState extends State<_AprsMapContent> {
 
   void _onDataUpdate() {
     if (mounted) {
+      _updateTileProvider();
       setState(() {
         _packets = _radioController?.aprsPackets ?? [];
         _updateCurrentCenter();
@@ -140,94 +176,100 @@ class _AprsMapContentState extends State<_AprsMapContent> {
   }
 
   void _showPacketDetails(BuildContext context, AprsPacket packet) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) {
-        return _PacketDetailsSheet(packet: packet);
-      },
+      showModalBottomSheet(
+      context: context, isScrollControlled: true, backgroundColor: Colors.transparent,
+      builder: (ctx) => _PacketDetailsSheet(packet: packet),
     );
   }
 
+  LatLng? _currentGpsCenter;
   void _updateCurrentCenter() {
-    LatLng? newCenter;
+     LatLng? newCenter;
+    final GpsSource currentSource = gpsSourceNotifier.value;
 
-    if (gpsSourceNotifier.value == GpsSource.device && locationService.currentPosition != null) {
+    if (currentSource == GpsSource.device && locationService.currentPosition != null) {
       final pos = locationService.currentPosition!;
       newCenter = LatLng(pos.latitude, pos.longitude);
-    } else if (gpsSourceNotifier.value == GpsSource.radio && _radioController?.gps != null) {
+    } else if (currentSource == GpsSource.radio && _radioController?.gps != null) {
       final pos = _radioController!.gps!;
       newCenter = LatLng(pos.latitude, pos.longitude);
-    } else if (kDebugMode && gpsSourceNotifier.value == GpsSource.debug) {
+    } else if (kDebugMode && currentSource == GpsSource.debug) {
       final pos = LocationService.debugPosition;
       newCenter = LatLng(pos.latitude, pos.longitude);
     }
-
-    if (newCenter != null && newCenter != _currentCenter) {
-      _currentCenter = newCenter;
-      _mapController.move(_currentCenter, _mapController.camera.zoom);
-    }
+    _currentGpsCenter = newCenter;
   }
 
   void _updatePathLines() {
-    _pathPolylines = [];
+     _pathPolylines = [];
     final latestPacket = _radioController?.latestAprsPacket;
-    if (!showAprsPathsNotifier.value || latestPacket == null || latestPacket.path.isEmpty) {
-      return;
-    }
+    if (!showAprsPathsNotifier.value || latestPacket == null || latestPacket.path.isEmpty) return;
 
     AprsPacket? sourcePacket;
-    try {
-      sourcePacket = _packets.firstWhere((p) => p.source == latestPacket.source);
-    } catch(e) { /* not found */ }
+    try { sourcePacket = _packets.firstWhere((p) => p.source == latestPacket.source); } catch(e) { /* not found */ }
+    if (sourcePacket?.latitude == null || sourcePacket?.longitude == null) return;
 
-    if (sourcePacket?.latitude == null) return;
-
-    final pathPoints = <LatLng>[
-      LatLng(sourcePacket!.latitude!, sourcePacket.longitude!),
-    ];
+    final pathPoints = <LatLng>[ LatLng(sourcePacket!.latitude!, sourcePacket.longitude!) ];
 
     for (final callsign in latestPacket.path) {
       final cleanCallsign = callsign.replaceAll('*', '');
       AprsPacket? digipeaterPacket;
-      try {
-        digipeaterPacket = _packets.firstWhere((p) => p.source == cleanCallsign);
-      } catch (e) { /* not found */ }
-
-      if (digipeaterPacket?.latitude != null) {
+      try { digipeaterPacket = _packets.firstWhere((p) => p.source == cleanCallsign); } catch (e) { /* not found */ }
+      if (digipeaterPacket?.latitude != null && digipeaterPacket?.longitude != null) {
         pathPoints.add(LatLng(digipeaterPacket!.latitude!, digipeaterPacket.longitude!));
         break;
       }
     }
 
     if (pathPoints.length > 1) {
-      _pathPolylines.add(
-        Polyline(
-          points: pathPoints,
-          color: Colors.orange.withOpacity(0.8),
-          strokeWidth: 3.0,
-        ),
-      );
+      _pathPolylines.add( Polyline( points: pathPoints, color: Colors.orange.withOpacity(0.8), strokeWidth: 3.0 ) );
     }
+  }
+
+  void _setHomeLocation(LatLng location) {
+    // Call top-level function from settings.dart
+    updateHomeLocation(location);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Home location set to ${location.latitude.toStringAsFixed(4)}, ${location.longitude.toStringAsFixed(4)}'),
+        backgroundColor: Colors.green, duration: const Duration(seconds: 2),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final markers = _packets
-        .where((p) => p.latitude != null && p.longitude != null)
-        .map((packet) {
-      return Marker(
-        width: 80.0,
-        height: 80.0,
-        point: LatLng(packet.latitude!, packet.longitude!),
-        child: GestureDetector(
-          onTap: () => _showPacketDetails(context, packet),
-          child: _StationMarker(packet: packet),
+    final LatLng? homeLoc = homeLocationNotifier.value;
+
+    Marker? homeMarker;
+    if (homeLoc != null) {
+        homeMarker = Marker(
+        point: homeLoc, width: 80, height: 60, alignment: Alignment.center,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon( Icons.home_filled, color: Colors.red[400], size: 30, shadows: const [Shadow(blurRadius: 3.0, color: Colors.black54)] ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+              decoration: BoxDecoration( color: Colors.black.withOpacity(0.75), borderRadius: BorderRadius.circular(4), border: Border.all(color: Colors.white.withOpacity(0.5), width: 0.5) ),
+              child: Text('HOME', style: TextStyle( color: Colors.red[300], fontSize: 10, fontWeight: FontWeight.bold )),
+            ),
+          ]
         ),
       );
-    }).toList();
+    }
+
+    final List<Marker> aprsMarkers = _packets
+        .where((p) => p.latitude != null && p.longitude != null)
+        .map((packet) => Marker(
+            width: 80.0, height: 80.0, point: LatLng(packet.latitude!, packet.longitude!),
+            child: GestureDetector( onTap: () => _showPacketDetails(context, packet), child: _StationMarker(packet: packet) ),
+          )).toList();
+
+    final List<Marker> allMarkers = [];
+    if (homeMarker != null) allMarkers.add(homeMarker);
+    allMarkers.addAll(aprsMarkers);
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(20),
@@ -236,48 +278,71 @@ class _AprsMapContentState extends State<_AprsMapContent> {
           FlutterMap(
             mapController: _mapController,
             options: MapOptions(
-              initialCenter: _currentCenter,
-              initialZoom: 8.0,
-              minZoom: 5,
-              maxZoom: 18,
+              initialCenter: homeLoc ?? _initialCenter, initialZoom: 8.0, minZoom: 5, maxZoom: 18,
+              interactionOptions: const InteractionOptions( flags: InteractiveFlag.all & ~InteractiveFlag.rotate ),
+              onLongPress: (tapPosition, latLng) => _setHomeLocation(latLng),
             ),
             children: [
               TileLayer(
                 urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                 userAgentPackageName: 'com.sarahrose.benshidash',
+                tileProvider: _tileProvider,
+                errorTileCallback: (tile, error, stackTrace) => print('Error loading tile ${tile.coordinates}: $error'),
                 tileBuilder: theme.brightness == Brightness.dark
-                    ? (context, tileWidget, tile) => ColorFiltered(
-                          colorFilter: const ColorFilter.matrix([
-                            -0.8, 0, 0, 0, 230,
-                            0, -0.8, 0, 0, 230,
-                            0, 0, -0.8, 0, 230,
-                            0, 0, 0, 1, 0,
-                          ]),
-                          child: tileWidget,
-                        )
+                    ? _darkModeTileBuilder // Call the method
                     : null,
               ),
+              if (homeLoc != null)
+                CircleLayer( circles: [ CircleMarker(
+                        point: homeLoc, radius: aprsNearbyRadiusNotifier.value * 1609.34, useRadiusInMeter: true,
+                        color: Colors.white.withOpacity(0.1), borderColor: Colors.white.withOpacity(0.5), borderStrokeWidth: 1.5,
+                    ) ] ),
               PolylineLayer(polylines: _pathPolylines),
-              MarkerLayer(markers: markers),
+              MarkerLayer(markers: allMarkers),
             ],
           ),
           Positioned(
-            bottom: 16,
-            right: 16,
+            bottom: 16, right: 16,
             child: FloatingActionButton(
+              heroTag: 'recenterMapFab',
               onPressed: () {
-                _mapController.move(_currentCenter, _mapController.camera.zoom);
+                if (_currentGpsCenter != null) { _mapController.move(_currentGpsCenter!, _mapController.camera.zoom); }
+                else { ScaffoldMessenger.of(context).showSnackBar( const SnackBar(content: Text("Current GPS location not available."), duration: Duration(seconds: 2)) ); }
               },
-              backgroundColor: theme.colorScheme.surface.withOpacity(0.8),
+              backgroundColor: theme.colorScheme.surface.withOpacity(0.85),
               child: Icon(Icons.my_location, color: theme.colorScheme.onSurface),
             ),
           ),
+           if (homeLoc != null)
+             Positioned(
+               bottom: 16 + 56 + 10, right: 16,
+               child: FloatingActionButton(
+                 heroTag: 'centerHomeFab', mini: true,
+                 onPressed: () => _mapController.move(homeLoc, _mapController.camera.zoom),
+                 backgroundColor: theme.colorScheme.surface.withOpacity(0.85),
+                 child: Icon(Icons.home_filled, color: Colors.red[400]),
+               ),
+             ),
         ],
       ),
     );
   }
+
+  // Helper method for dark mode tile building
+  Widget _darkModeTileBuilder(BuildContext context, Widget tileWidget, TileImage tile) {
+    return ColorFiltered(
+      colorFilter: const ColorFilter.matrix([
+          -1, 0, 0, 0, 255, // Red
+          0, -1, 0, 0, 255, // Green
+          0, 0, -1, 0, 255, // Blue
+          0, 0, 0, 1, 0,    // Alpha
+      ]),
+      child: tileWidget,
+    );
+  }
 }
 
+// _StationMarker remains unchanged
 class _StationMarker extends StatelessWidget {
   final AprsPacket packet;
   const _StationMarker({required this.packet});
@@ -318,6 +383,8 @@ class _StationMarker extends StatelessWidget {
   }
 }
 
+
+// _PacketDetailsSheet remains unchanged
 class _PacketDetailsSheet extends StatelessWidget {
   final AprsPacket packet;
   const _PacketDetailsSheet({required this.packet});

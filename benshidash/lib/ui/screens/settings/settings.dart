@@ -1,3 +1,4 @@
+// ui/screens/settings/settings.dart
 import 'dart:async';
 import 'package:benshidash/services/location_service.dart';
 import 'package:flutter/foundation.dart';
@@ -8,7 +9,10 @@ import '../../../benshi/radio_controller.dart';
 import '../../../main.dart';
 import '../../widgets/main_layout.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:latlong2/latlong.dart'; // Import LatLng
+import 'map_settings.dart'; // Import the new Map Settings screen
 
+// --- Notifiers and Constants ---
 class ThemeNotifier extends ChangeNotifier {
   ThemeMode _themeMode = ThemeMode.dark;
   ThemeMode get themeMode => _themeMode;
@@ -33,10 +37,51 @@ const String PREF_GPS_SOURCE = 'gps_source';
 final ValueNotifier<double> aprsNearbyRadiusNotifier = ValueNotifier(50.0);
 const String PREF_APRS_RADIUS = 'aprs_nearby_radius';
 
-// --- NEW: Added APRS frequency setting ---
 final ValueNotifier<double> aprsFrequencyNotifier = ValueNotifier(144.390);
 const String PREF_APRS_FREQUENCY = 'aprs_frequency';
-// -----------------------------------------
+
+final ValueNotifier<bool> offlineModeNotifier = ValueNotifier(false);
+const String PREF_OFFLINE_MODE = 'offline_mode';
+
+final ValueNotifier<LatLng?> homeLocationNotifier = ValueNotifier(null);
+const String PREF_HOME_LAT = 'home_latitude';
+const String PREF_HOME_LON = 'home_longitude';
+
+// --- Top-Level Helper Functions for Settings ---
+
+// Loads map-specific settings from SharedPreferences
+Future<void> loadMapSettings(SharedPreferences prefs) async {
+  offlineModeNotifier.value = prefs.getBool(PREF_OFFLINE_MODE) ?? false;
+  final double? lat = prefs.getDouble(PREF_HOME_LAT);
+  final double? lon = prefs.getDouble(PREF_HOME_LON);
+  if (lat != null && lon != null) {
+    homeLocationNotifier.value = LatLng(lat, lon);
+  } else {
+    homeLocationNotifier.value = null;
+  }
+}
+
+// Updates the home location notifier and saves to SharedPreferences
+Future<void> updateHomeLocation(LatLng? newLocation) async {
+  homeLocationNotifier.value = newLocation;
+  final prefs = await SharedPreferences.getInstance();
+  if (newLocation != null) {
+    await prefs.setDouble(PREF_HOME_LAT, newLocation.latitude);
+    await prefs.setDouble(PREF_HOME_LON, newLocation.longitude);
+  } else {
+    await prefs.remove(PREF_HOME_LAT);
+    await prefs.remove(PREF_HOME_LON);
+  }
+}
+
+// Toggles the offline mode notifier and saves to SharedPreferences
+Future<void> toggleOfflineMode(bool value) async {
+  offlineModeNotifier.value = value;
+  final prefs = await SharedPreferences.getInstance();
+  await prefs.setBool(PREF_OFFLINE_MODE, value);
+}
+
+// --- Settings Screen Widget ---
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -46,6 +91,7 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
+  // Methods specific to the UI interaction within this screen
   Future<void> _showDeviceSelectionDialog(BuildContext context) async {
     showDialog(
       context: context,
@@ -85,7 +131,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await prefs.setDouble(PREF_APRS_RADIUS, value);
   }
 
-  // --- NEW: Method to show a dialog for editing the APRS frequency ---
   Future<void> _editAprsFrequency(BuildContext context) async {
     final TextEditingController controller = TextEditingController(
       text: aprsFrequencyNotifier.value.toStringAsFixed(3),
@@ -133,8 +178,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    // Combine listeners
     return AnimatedBuilder(
-      animation: Listenable.merge([themeNotifier, showAprsPathsNotifier, gpsSourceNotifier, aprsNearbyRadiusNotifier, aprsFrequencyNotifier]),
+      animation: Listenable.merge([
+        themeNotifier,
+        showAprsPathsNotifier,
+        gpsSourceNotifier,
+        aprsNearbyRadiusNotifier,
+        aprsFrequencyNotifier,
+        offlineModeNotifier, // Add new notifier
+        homeLocationNotifier, // Add new notifier
+      ]),
       builder: (context, child) {
         return ValueListenableBuilder<RadioController?>(
           valueListenable: radioControllerNotifier,
@@ -182,7 +236,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           ),
                         ),
                         const Divider(height: 1),
-                        // --- NEW: APRS Frequency Setting ---
                         ListTile(
                           leading: Icon(Icons.track_changes, color: theme.colorScheme.primary),
                           title: const Text('APRS Frequency'),
@@ -191,7 +244,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           onTap: () => _editAprsFrequency(context),
                         ),
                         const Divider(height: 1),
-                        // ------------------------------------
                         SwitchListTile(
                           title: const Text('Show APRS Packet Paths'),
                           subtitle: const Text('Draw lines showing the path a packet took.'),
@@ -201,14 +253,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ),
                         const Divider(height: 1),
                         _buildSliderSetting(
-                            title: 'APRS "Nearby" Radius',
-                            subtitle: 'Current: ${aprsNearbyRadiusNotifier.value.round()} miles',
-                            value: aprsNearbyRadiusNotifier.value,
-                            min: 5,
-                            max: 200,
-                            divisions: 39, // (200-5)/5
-                            onChanged: (val) => setState(() => aprsNearbyRadiusNotifier.value = val),
-                            onChangeEnd: _onAprsRadiusChanged,
+                          context: context, // Pass context here
+                          title: 'APRS "Nearby" Radius',
+                          subtitle: 'Current: ${aprsNearbyRadiusNotifier.value.round()} miles',
+                          value: aprsNearbyRadiusNotifier.value,
+                          min: 5,
+                          max: 200,
+                          divisions: 39, // (200-5)/5
+                          onChanged: (val) => setState(() => aprsNearbyRadiusNotifier.value = val),
+                          onChangeEnd: _onAprsRadiusChanged,
                         ),
                         const Divider(height: 1),
                         SwitchListTile(
@@ -226,6 +279,37 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ],
                     ),
                   ),
+                  _buildSectionTitle('Map Settings', theme),
+                   Card(
+                      child: Column(
+                       children: [
+                         SwitchListTile(
+                            title: const Text('Offline Map Mode'),
+                            subtitle: const Text('Use downloaded map tiles when available.'),
+                            value: offlineModeNotifier.value,
+                            // --- CORRECTED CALL ---
+                            onChanged: toggleOfflineMode, // Call top-level function
+                            // ----------------------
+                            secondary: Icon(Icons.cloud_off, color: theme.colorScheme.primary),
+                          ),
+                         const Divider(height: 1),
+                         ListTile(
+                            leading: Icon(Icons.map, color: theme.colorScheme.primary),
+                            title: const Text('Configure Offline Maps'),
+                            subtitle: Text(homeLocationNotifier.value == null
+                                ? 'Set home location on APRS map first (long-press)' // Updated instruction
+                                : 'Home: ${homeLocationNotifier.value!.latitude.toStringAsFixed(4)}, ${homeLocationNotifier.value!.longitude.toStringAsFixed(4)}'),
+                            trailing: const Icon(Icons.arrow_forward_ios),
+                           onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(builder: (context) => const MapSettingsScreen()),
+                              );
+                           },
+                          ),
+                       ],
+                      ),
+                   ),
                 ],
               ),
             );
@@ -247,6 +331,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Widget _buildSliderSetting({
+    required BuildContext context, // Added context
     required String title,
     required String subtitle,
     required double value,
@@ -277,6 +362,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 }
 
+// --- _DeviceListDialog remains unchanged ---
 class _DeviceListDialog extends StatefulWidget {
   const _DeviceListDialog();
   @override
@@ -317,7 +403,7 @@ class _DeviceListDialogState extends State<_DeviceListDialog> {
           final isAlreadyBonded = _bondedDevices.any((d) => d.address == r.device.address);
           final isAlreadyDiscovered = _discoveredResults.any((res) => res.device.address == r.device.address);
 
-          if (!isAlreadyBonded && !isAlreadyDiscovered) {
+          if (!isAlreadyBonded && !isAlreadyDiscovered && (r.device.name?.isNotEmpty ?? false)) { // Also filter unnamed devices
             _discoveredResults.add(r);
           }
         });
@@ -326,10 +412,18 @@ class _DeviceListDialogState extends State<_DeviceListDialog> {
     _streamSubscription!.onDone(() {
       if (mounted) setState(() => _isDiscovering = false);
     });
+     _streamSubscription!.onError((e){
+        if (kDebugMode) print("Error during discovery: $e");
+        if (mounted) setState(() => _isDiscovering = false);
+     });
   }
 
   Future<void> _connectToDevice(BluetoothDevice device) async {
     setState(() => _isConnecting = true);
+    // Cancel discovery when attempting connection
+    await FlutterBluetoothSerial.instance.cancelDiscovery();
+    if(mounted) setState(() => _isDiscovering = false);
+
     final navigator = Navigator.of(context);
     final messenger = ScaffoldMessenger.of(context);
     try {
@@ -346,7 +440,9 @@ class _DeviceListDialogState extends State<_DeviceListDialog> {
       messenger.showSnackBar(
         SnackBar(content: Text('Connection failed: $e'), backgroundColor: Colors.red),
       );
-      if (mounted) {
+      // Don't restart discovery automatically here, let user retry if needed
+    } finally {
+       if (mounted) {
         setState(() => _isConnecting = false);
       }
     }
@@ -355,6 +451,7 @@ class _DeviceListDialogState extends State<_DeviceListDialog> {
   @override
   void dispose() {
     _streamSubscription?.cancel();
+    // Ensure discovery is cancelled if dialog is closed
     FlutterBluetoothSerial.instance.cancelDiscovery();
     super.dispose();
   }
@@ -389,12 +486,20 @@ class _DeviceListDialogState extends State<_DeviceListDialog> {
       ListTile(
         dense: true,
         title: Text("Available Devices", style: theme.textTheme.titleSmall),
+        trailing: _isDiscovering ? null : IconButton(
+           icon: const Icon(Icons.refresh),
+           tooltip: "Rescan",
+           onPressed: _isConnecting ? null : _refreshDeviceLists,
+        ),
       )
     );
 
     if (_discoveredResults.isEmpty && !_isDiscovering) {
-      listItems.add(const ListTile(subtitle: Text("No new devices found.")));
-    } else {
+      listItems.add(const ListTile(subtitle: Text("No new devices found. Tap refresh to scan.")));
+    } else if (_discoveredResults.isEmpty && _isDiscovering) {
+       listItems.add(const ListTile(subtitle: Text("Scanning...")));
+    }
+    else {
       listItems.addAll(
         _discoveredResults.map((result) => ListTile(
             leading: const Icon(Icons.bluetooth_searching),
@@ -416,9 +521,9 @@ class _DeviceListDialogState extends State<_DeviceListDialog> {
           )
       ]),
       content: SizedBox(
-        width: double.maxFinite,
+        width: double.maxFinite, // Use maxFinite for dialogs
         child: ListView(
-          shrinkWrap: true,
+          shrinkWrap: true, // Important for ListView in Dialog
           children: listItems,
         ),
       ),

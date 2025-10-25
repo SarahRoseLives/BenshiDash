@@ -1,16 +1,33 @@
+// main.dart
 import 'package:benshidash/services/location_service.dart';
 import 'package:flutter/material.dart';
 import 'benshi/radio_controller.dart';
-import 'ui/screens/settings/settings.dart';
+import 'ui/screens/settings/settings.dart'; // Import settings.dart
 import 'ui/screens/splash.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_bluetooth_serial/flutter_bluetooth_serial.dart';
+import 'package:flutter_map_tile_caching/flutter_map_tile_caching.dart';
 
 final ValueNotifier<RadioController?> radioControllerNotifier = ValueNotifier(null);
 const String PREF_LAST_DEVICE_ADDRESS = 'last_connected_device_address';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Initialize Tile Cache Database
+  try {
+    await FMTCObjectBoxBackend().initialise();
+    const String defaultStoreName = 'default';
+    final store = FMTCStore(defaultStoreName);
+    if (!(await store.manage.ready)) {
+      print('Creating cache store: $defaultStoreName');
+      await store.manage.create();
+    } else {
+      print('Cache store "$defaultStoreName" already exists.');
+    }
+  } catch (e, s) {
+    print("Failed to initialize/create tile cache: $e\n$s");
+  }
 
   final prefs = await SharedPreferences.getInstance();
   await _loadSettings(prefs);
@@ -19,16 +36,18 @@ Future<void> main() async {
   runApp(const TabletGatekeeper());
 }
 
+// Loads ALL settings now
 Future<void> _loadSettings(SharedPreferences prefs) async {
   showAprsPathsNotifier.value = prefs.getBool(PREF_SHOW_APRS_PATHS) ?? false;
   final savedSource = GpsSource.values[prefs.getInt(PREF_GPS_SOURCE) ?? GpsSource.radio.index];
   gpsSourceNotifier.value = savedSource;
   aprsNearbyRadiusNotifier.value = prefs.getDouble(PREF_APRS_RADIUS) ?? 50.0;
-  // --- NEW: Load the APRS frequency setting ---
   aprsFrequencyNotifier.value = prefs.getDouble(PREF_APRS_FREQUENCY) ?? 144.390;
 
+  // --- CORRECTED CALL: Load map settings using the top-level function ---
+  await loadMapSettings(prefs);
+  // --------------------------------------------------------------------
 
-  // Start the location service if the saved preference is 'device'
   if (savedSource == GpsSource.device) {
     await locationService.start();
   }
@@ -52,6 +71,7 @@ Future<void> _tryAutoConnect(SharedPreferences prefs) async {
   }
 }
 
+// --- AppThemes, TabletGatekeeper, CarHeadUnitApp remain unchanged ---
 class AppThemes {
   static final darkTheme = ThemeData(
     brightness: Brightness.dark,
@@ -116,7 +136,7 @@ class TabletGatekeeper extends StatelessWidget {
       home: Builder(
         builder: (context) {
           final shortestSide = MediaQuery.of(context).size.shortestSide;
-          if (shortestSide < 600) {
+          if (shortestSide < 500) {
             // Not a tablet: block app usage
             return const Scaffold(
               body: Center(
