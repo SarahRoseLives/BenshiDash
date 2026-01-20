@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bluetooth_serial/flutter_bluetooth_serial.dart';
+import 'package:permission_handler/permission_handler.dart';
 import '../../../benshi/radio_controller.dart';
 import '../../../main.dart';
 import '../../widgets/main_layout.dart';
@@ -388,6 +389,22 @@ class _DeviceListDialogState extends State<_DeviceListDialog> {
       _bondedDevices = [];
       _discoveredResults = [];
     });
+
+    // Request Bluetooth permissions on Android 12+
+    final btScanStatus = await Permission.bluetoothScan.request();
+    final btConnectStatus = await Permission.bluetoothConnect.request();
+    final locationStatus = await Permission.locationWhenInUse.request();
+
+    if (!btScanStatus.isGranted || !btConnectStatus.isGranted || !locationStatus.isGranted) {
+      if (kDebugMode) print("Bluetooth/Location permissions not granted");
+      if (mounted) {
+        setState(() => _isDiscovering = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Bluetooth and location permissions are required to scan for devices.'), backgroundColor: Colors.orange),
+        );
+      }
+      return;
+    }
 
     try {
       _bondedDevices = await FlutterBluetoothSerial.instance.getBondedDevices();
