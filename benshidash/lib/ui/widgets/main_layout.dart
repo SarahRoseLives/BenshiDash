@@ -1,5 +1,7 @@
 import 'dart:math';
 import 'package:benshidash/benshi/radio_controller.dart';
+import 'package:benshidash/services/location_service.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 // Import all the destination screens
@@ -395,29 +397,79 @@ class _GPSStatus extends StatelessWidget {
   final RadioController? radioController;
   final double fontScale;
   const _GPSStatus({required this.radioController, required this.fontScale});
+  
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final bool isLocked = radioController?.isGpsLocked ?? false;
-    final lat = radioController?.gps?.latitude ?? 0;
-    final lon = radioController?.gps?.longitude ?? 0;
-
-    final lockedColor = theme.brightness == Brightness.dark ? Colors.lightGreenAccent : Colors.green.shade700;
-    return Row(
-      children: [
-        Icon(
-            isLocked ? Icons.gps_fixed : Icons.gps_off,
-            color: isLocked ? lockedColor : theme.iconTheme.color?.withOpacity(0.4),
-            size: 22 * fontScale),
-        SizedBox(width: 4 * fontScale),
-        Text(
-          isLocked
-              ? "${lat.toStringAsFixed(4)}, ${lon.toStringAsFixed(4)}"
-              : "No Fix",
-          style: TextStyle(
-              color: theme.colorScheme.onBackground, fontSize: 14 * fontScale),
-        ),
-      ],
+    
+    return ValueListenableBuilder<GpsSource>(
+      valueListenable: gpsSourceNotifier,
+      builder: (context, gpsSource, _) {
+        // For device GPS, we need to listen to location service updates
+        if (gpsSource == GpsSource.device) {
+          return AnimatedBuilder(
+            animation: locationService,
+            builder: (context, _) {
+              final pos = locationService.currentPosition;
+              final bool isLocked = pos != null;
+              final double lat = pos?.latitude ?? 0;
+              final double lon = pos?.longitude ?? 0;
+              
+              final lockedColor = theme.brightness == Brightness.dark ? Colors.lightGreenAccent : Colors.green.shade700;
+              return Row(
+                children: [
+                  Icon(
+                      isLocked ? Icons.gps_fixed : Icons.gps_off,
+                      color: isLocked ? lockedColor : theme.iconTheme.color?.withOpacity(0.4),
+                      size: 22 * fontScale),
+                  SizedBox(width: 4 * fontScale),
+                  Text(
+                    isLocked
+                        ? "${lat.toStringAsFixed(4)}, ${lon.toStringAsFixed(4)}"
+                        : "No Fix",
+                    style: TextStyle(
+                        color: theme.colorScheme.onBackground, fontSize: 14 * fontScale),
+                  ),
+                ],
+              );
+            },
+          );
+        }
+        
+        // For radio GPS, determine data
+        bool isLocked = false;
+        double lat = 0;
+        double lon = 0;
+        
+        if (gpsSource == GpsSource.radio && radioController != null) {
+          isLocked = radioController!.isGpsLocked;
+          lat = radioController!.gps?.latitude ?? 0;
+          lon = radioController!.gps?.longitude ?? 0;
+        } else if (kDebugMode && gpsSource == GpsSource.debug) {
+          final pos = LocationService.debugPosition;
+          isLocked = true;
+          lat = pos.latitude;
+          lon = pos.longitude;
+        }
+        
+        final lockedColor = theme.brightness == Brightness.dark ? Colors.lightGreenAccent : Colors.green.shade700;
+        return Row(
+          children: [
+            Icon(
+                isLocked ? Icons.gps_fixed : Icons.gps_off,
+                color: isLocked ? lockedColor : theme.iconTheme.color?.withOpacity(0.4),
+                size: 22 * fontScale),
+            SizedBox(width: 4 * fontScale),
+            Text(
+              isLocked
+                  ? "${lat.toStringAsFixed(4)}, ${lon.toStringAsFixed(4)}"
+                  : "No Fix",
+              style: TextStyle(
+                  color: theme.colorScheme.onBackground, fontSize: 14 * fontScale),
+            ),
+          ],
+        );
+      },
     );
   }
 }
@@ -435,23 +487,62 @@ class _BottomStatusBar extends StatelessWidget {
     final theme = Theme.of(context);
     final textColor = theme.colorScheme.onSurface.withOpacity(0.8);
     final iconColor = theme.colorScheme.onSurface.withOpacity(0.5);
-    final gpsTime = radioController?.gps?.time.toIso8601String() ?? '...';
-
-    return Container(
-      color: theme.colorScheme.surface,
-      padding:
-          EdgeInsets.symmetric(horizontal: 12 * fontScale, vertical: 7 * fontScale),
-      child: Row(
-        children: [
-          Icon(Icons.access_time, color: iconColor, size: 18 * fontScale),
-          SizedBox(width: 3 * fontScale),
-          Text(gpsTime, style: TextStyle(color: textColor, fontSize: 13 * fontScale)),
-          const Spacer(),
-          Icon(Icons.info_outline, color: iconColor, size: 16 * fontScale),
-          SizedBox(width: 3 * fontScale),
-          Text("All systems nominal", style: TextStyle(color: textColor, fontSize: 13 * fontScale)),
-        ],
-      ),
+    
+    return ValueListenableBuilder<GpsSource>(
+      valueListenable: gpsSourceNotifier,
+      builder: (context, gpsSource, _) {
+        // For device GPS, listen to location service updates
+        if (gpsSource == GpsSource.device) {
+          return AnimatedBuilder(
+            animation: locationService,
+            builder: (context, _) {
+              final gpsTime = locationService.currentPosition?.timestamp.toIso8601String() ?? '...';
+              
+              return Container(
+                color: theme.colorScheme.surface,
+                padding:
+                    EdgeInsets.symmetric(horizontal: 12 * fontScale, vertical: 7 * fontScale),
+                child: Row(
+                  children: [
+                    Icon(Icons.access_time, color: iconColor, size: 18 * fontScale),
+                    SizedBox(width: 3 * fontScale),
+                    Text(gpsTime, style: TextStyle(color: textColor, fontSize: 13 * fontScale)),
+                    const Spacer(),
+                    Icon(Icons.info_outline, color: iconColor, size: 16 * fontScale),
+                    SizedBox(width: 3 * fontScale),
+                    Text("All systems nominal", style: TextStyle(color: textColor, fontSize: 13 * fontScale)),
+                  ],
+                ),
+              );
+            },
+          );
+        }
+        
+        // For radio GPS or debug GPS
+        String gpsTime = '...';
+        if (gpsSource == GpsSource.radio && radioController?.gps != null) {
+          gpsTime = radioController!.gps!.time.toIso8601String();
+        } else if (kDebugMode && gpsSource == GpsSource.debug) {
+          gpsTime = LocationService.debugPosition.timestamp.toIso8601String();
+        }
+        
+        return Container(
+          color: theme.colorScheme.surface,
+          padding:
+              EdgeInsets.symmetric(horizontal: 12 * fontScale, vertical: 7 * fontScale),
+          child: Row(
+            children: [
+              Icon(Icons.access_time, color: iconColor, size: 18 * fontScale),
+              SizedBox(width: 3 * fontScale),
+              Text(gpsTime, style: TextStyle(color: textColor, fontSize: 13 * fontScale)),
+              const Spacer(),
+              Icon(Icons.info_outline, color: iconColor, size: 16 * fontScale),
+              SizedBox(width: 3 * fontScale),
+              Text("All systems nominal", style: TextStyle(color: textColor, fontSize: 13 * fontScale)),
+            ],
+          ),
+        );
+      },
     );
   }
 }

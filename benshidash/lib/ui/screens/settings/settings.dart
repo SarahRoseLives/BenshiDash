@@ -115,15 +115,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _onGpsSourceChanged(GpsSource? source) async {
     if (source == null) return;
-    gpsSourceNotifier.value = source;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt(PREF_GPS_SOURCE, source.index);
-
+    
     if (source == GpsSource.device) {
+      // Request location permission before starting device GPS
+      final locationStatus = await Permission.locationWhenInUse.request();
+      if (!locationStatus.isGranted) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Location permission is required for Device GPS.'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+        return; // Don't change GPS source if permission denied
+      }
       await locationService.start();
     } else {
       locationService.stop();
     }
+    
+    gpsSourceNotifier.value = source;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(PREF_GPS_SOURCE, source.index);
   }
 
   Future<void> _onAprsRadiusChanged(double value) async {

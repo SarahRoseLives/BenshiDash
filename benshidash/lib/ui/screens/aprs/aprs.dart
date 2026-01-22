@@ -318,8 +318,19 @@ class _AprsMapContentState extends State<_AprsMapContent> {
             child: FloatingActionButton(
               heroTag: 'recenterMapFab',
               onPressed: () {
-                if (_currentGpsCenter != null) { _mapController.move(_currentGpsCenter!, _mapController.camera.zoom); }
-                else { ScaffoldMessenger.of(context).showSnackBar( const SnackBar(content: Text("Current GPS location not available."), duration: Duration(seconds: 2)) ); }
+                // Update current GPS center before trying to use it
+                _updateCurrentCenter();
+                
+                if (_currentGpsCenter != null) { 
+                  _mapController.move(_currentGpsCenter!, _mapController.camera.zoom); 
+                } else { 
+                  ScaffoldMessenger.of(context).showSnackBar( 
+                    const SnackBar(
+                      content: Text("Current GPS location not available."), 
+                      duration: Duration(seconds: 2)
+                    ) 
+                  ); 
+                }
               },
               backgroundColor: theme.colorScheme.surface.withOpacity(0.85),
               child: Icon(Icons.my_location, color: theme.colorScheme.onSurface),

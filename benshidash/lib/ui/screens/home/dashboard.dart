@@ -384,11 +384,48 @@ class _GPSFollowWidget extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final bool locked = radioController.isGpsLocked;
-    final double lat = radioController.gps?.latitude ?? 0;
-    final double lon = radioController.gps?.longitude ?? 0;
-    final double accuracy = radioController.gps?.accuracy.toDouble() ?? 0;
-
+    
+    return ValueListenableBuilder<GpsSource>(
+      valueListenable: gpsSourceNotifier,
+      builder: (context, gpsSource, _) {
+        // Determine GPS status based on selected source
+        bool locked = false;
+        double lat = 0;
+        double lon = 0;
+        double accuracy = 0;
+        
+        if (gpsSource == GpsSource.radio) {
+          locked = radioController.isGpsLocked;
+          lat = radioController.gps?.latitude ?? 0;
+          lon = radioController.gps?.longitude ?? 0;
+          accuracy = radioController.gps?.accuracy.toDouble() ?? 0;
+        } else if (gpsSource == GpsSource.device) {
+          return AnimatedBuilder(
+            animation: locationService,
+            builder: (context, _) {
+              final pos = locationService.currentPosition;
+              final deviceLocked = pos != null;
+              final deviceLat = pos?.latitude ?? 0;
+              final deviceLon = pos?.longitude ?? 0;
+              final deviceAccuracy = pos?.accuracy ?? 0;
+              
+              return _buildCard(context, theme, deviceLocked, deviceLat, deviceLon, deviceAccuracy);
+            },
+          );
+        } else if (kDebugMode && gpsSource == GpsSource.debug) {
+          final pos = LocationService.debugPosition;
+          locked = true;
+          lat = pos.latitude;
+          lon = pos.longitude;
+          accuracy = pos.accuracy;
+        }
+        
+        return _buildCard(context, theme, locked, lat, lon, accuracy);
+      },
+    );
+  }
+  
+  Widget _buildCard(BuildContext context, ThemeData theme, bool locked, double lat, double lon, double accuracy) {
     return _StyledCard(
       fontScale: fontScale,
       padding: EdgeInsets.symmetric(horizontal: 20 * fontScale, vertical: 20 * fontScale),
