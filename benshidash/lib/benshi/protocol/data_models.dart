@@ -692,7 +692,7 @@ factory Settings.fromBytes(Uint8List bytes) {
 
   // Fully implemented toBytes method
   Uint8List toBytes() {
-    final w = ByteWriter(20); // Settings object is 20 bytes
+    final w = ByteWriter(22); // Settings object is 22 bytes (20 + 2 padding)
     w.writeInt(channelA & 0x0F, 4); // lower 4 bits
     w.writeInt(channelB & 0x0F, 4); // lower 4 bits
     w.writeBool(scan);
@@ -735,6 +735,7 @@ factory Settings.fromBytes(Uint8List bytes) {
     w.writeInt(0, 3); // padding
     w.writeInt(vfo1ModFreqX, 32);
     w.writeInt(vfo2ModFreqX, 32);
+    w.writeInt(0, 16); // 2 bytes padding at end (required by radio)
     return w.toBytes();
   }
 

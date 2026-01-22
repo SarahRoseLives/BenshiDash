@@ -129,12 +129,21 @@ class _AprsMapContentState extends State<_AprsMapContent> {
     final aprsFreq = aprsFrequencyNotifier.value;
 
     try {
-      final aprsChannel = Channel(
-        channelId: aprsChannelId, name: 'APRS', rxFreq: aprsFreq, txFreq: aprsFreq,
-        rxMod: ModulationType.FM, txMod: ModulationType.FM, bandwidth: BandwidthType.WIDE,
-        scan: false, txDisable: true, txAtMaxPower: false, txAtMedPower: false,
-        talkAround: false, preDeEmphBypass: false, sign: false,
-        fixedFreq: false, fixedBandwidth: false, fixedTxPower: false, mute: false,
+      // Read the existing channel first, then modify it (like benlink does)
+      final existingChannel = await _radioController!.getChannel(aprsChannelId);
+      
+      // Use copyWith to update only the fields we need for APRS
+      final aprsChannel = existingChannel.copyWith(
+        name: 'APRS',
+        rxFreq: aprsFreq,
+        txFreq: aprsFreq,
+        rxMod: ModulationType.FM,
+        txMod: ModulationType.FM,
+        bandwidth: BandwidthType.WIDE,
+        txSubAudio: null,
+        rxSubAudio: null,
+        scan: false,
+        txDisable: true,
       );
 
       await _radioController!.writeChannel(aprsChannel);
@@ -143,7 +152,10 @@ class _AprsMapContentState extends State<_AprsMapContent> {
       final currentSettings = _radioController!.settings ?? await _radioController!.getSettings();
       if (currentSettings != null) {
         final newSettings = currentSettings.copyWith(
-          doubleChannel: ChannelType.B.index, channelB: aprsChannelId,
+          doubleChannel: ChannelType.B.value,
+          channelB: aprsChannelId,
+          scan: false, // Disable scan when enabling dual watch
+          vfoX: 2, // Enable VFO mode for channel B (1 = VFO A, 2 = VFO B)
         );
         await _radioController!.writeSettings(newSettings);
       } else {

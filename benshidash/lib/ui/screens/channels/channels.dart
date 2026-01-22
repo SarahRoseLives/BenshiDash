@@ -190,11 +190,32 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
 
     try {
       Settings newSettings;
-      if (currentStatus.doubleChannel == ChannelType.B) {
-        newSettings = currentSettings.copyWith(channelB: channel.channelId);
+      
+      // Determine vfoX and doubleChannel based on target channel
+      int vfoXValue;
+      int doubleChannelValue;
+      
+      if (channel.channelId == 251) {
+        // Switching to VFO B (APRS channel)
+        vfoXValue = 2; // VFO mode on channel B
+        doubleChannelValue = ChannelType.B.value;
+      } else if (channel.channelId == 252) {
+        // Switching to VFO A
+        vfoXValue = 1; // VFO mode on channel A
+        doubleChannelValue = ChannelType.A.value;
       } else {
-        newSettings = currentSettings.copyWith(channelA: channel.channelId);
+        // Regular memory channel - disable VFO mode
+        vfoXValue = 0;
+        doubleChannelValue = ChannelType.OFF.value;
       }
+      
+      // Always set channelA to the target channel
+      // The radio uses channelA as the primary/active channel
+      newSettings = currentSettings.copyWith(
+        channelA: channel.channelId,
+        vfoX: vfoXValue,
+        doubleChannel: doubleChannelValue,
+      );
 
       await _radioController!.writeSettings(newSettings);
 

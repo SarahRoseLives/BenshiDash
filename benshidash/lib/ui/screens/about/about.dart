@@ -70,6 +70,8 @@ class AboutScreen extends StatelessWidget {
               const SizedBox(height: 5),
               Text(
                 "• Kyle Husmann — Benshi protocol reverse engineering, creator of Benlink\n"
+                "• Marshall Behrmann — Providing a tablet for testing\n"
+                "• Vero Radio — Providing radios for testing\n"
                 "• Flutter, Dart, and open-source contributors everywhere",
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
@@ -166,10 +168,11 @@ class AboutScreen extends StatelessWidget {
                     "This application was created after staring at a car's dashboard and thinking about what it might be like if ham radio operators had their own car dashboard just for their radio.\n\n"
                     "Then it dawned on me that I had ported the benshi protocol from Benlink to Dart for Flutter apps like Benshi Commander.\n\n"
                     "Thus I decided to base the head unit on these radios due to their Bluetooth functionality and the new ability to create Android apps thanks to my Flutter port of the protocol.\n\n"
-                    "Credits to Kyle Husmann for the original efforts to reverse engineer the benshi protocol and creating Benlink, which my Flutter port is based off of.",
-                    style: theme.textTheme.bodyLarge?.copyWith(
+                    "Credits to Kyle Husmann for the original efforts to reverse engineer the benshi protocol and creating Benlink, which my Flutter port is based off of.\n\n"
+                    "Special thanks to Marshall Behrmann for providing a tablet for testing and Vero Radio for providing radios for testing.",
+                    style: theme.textTheme.bodyMedium?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant,
-                      height: 1.35,
+                      height: 1.3,
                     ),
                     textAlign: TextAlign.center,
                   ),
